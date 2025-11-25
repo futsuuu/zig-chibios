@@ -48,13 +48,15 @@ export fn _start() linksection(".text.boot") callconv(.naked) noreturn {
 export fn kernelMain() noreturn {
     @memset(bss[0 .. @intFromPtr(bss_end) - @intFromPtr(bss)], 0);
 
-    sbi.console.putChar('\n');
+    writeCsr(.stvec, @intFromPtr(&kernelEntry));
+
     log.info("Hello {s}!", .{"World"});
 
-    writeCsr(.stvec, @intFromPtr(&kernelEntry));
-    asm volatile ("unimp");
+    const allocator = ram.bump_allocator;
+    log.debug("allocator test: {*}", .{allocator.alloc(u8, 0x2000) catch @panic("OOM")});
+    log.debug("allocator test: {*}", .{allocator.alloc(u8, 0x1000) catch @panic("OOM")});
 
-    @panic("unreachable");
+    @panic("booted!");
 }
 
 fn kernelEntry() align(4) callconv(.naked) noreturn {
@@ -187,6 +189,57 @@ inline fn writeCsr(comptime reg: @Type(.enum_literal), value: usize) void {
         : [value] "r" (value),
     );
 }
+
+const ram = struct {
+    const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
+    const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
+
+    const bump_allocator: std.mem.Allocator = .{
+        .ptr = &BumpAllocator.singleton,
+        .vtable = &BumpAllocator.vtable,
+    };
+
+    const BumpAllocator = struct {
+        allocated: usize = 0,
+
+        const Self = @This();
+        var singleton: Self = .{};
+
+        const vtable: std.mem.Allocator.VTable = .{
+            .alloc = alloc,
+            .remap = remap,
+            .resize = resize,
+            .free = free,
+        };
+
+        fn alloc(a: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
+            _ = ret_addr;
+            std.debug.assert(len > 0);
+            const self: *Self = @ptrCast(@alignCast(a));
+            const base = @intFromPtr(free_ram);
+            const start = alignment.forward(base + self.allocated);
+            const end = start + len;
+            if (end > @intFromPtr(free_ram_end)) return null;
+            self.allocated = end - base;
+            const ptr: [*]u8 = @ptrFromInt(start);
+            @memset(ptr[0..len], 0);
+            return ptr;
+        }
+
+        fn remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
+            @panic("BumpAllocator does not support remap() method");
+        }
+
+        fn resize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool {
+            @panic("BumpAllocator does not support resize() method");
+        }
+
+        fn free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {
+            @panic("BumpAllocator does not support free() method");
+        }
+
+    };
+};
 
 const sbi = struct {
     const Ret = struct {
