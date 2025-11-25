@@ -1,6 +1,17 @@
 const std = @import("std");
 const log = std.log.scoped(.kernel);
 
+pub const panic = blk: {
+    break :blk std.debug.FullPanic(struct {
+        fn panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
+            @branchHint(.cold);
+            _ = first_trace_addr;
+            log.err("PANIC: {s}", .{msg});
+            while (true) asm volatile ("wfi");
+        }
+    }.panic);
+};
+
 pub const std_options: std.Options = blk: {
     const funcs = struct {
         fn logFn(
@@ -41,9 +52,7 @@ export fn kernelMain() noreturn {
     sbi.console.putChar('\n');
     log.info("Hello {s}!", .{"World"});
 
-    while (true) {
-        asm volatile ("wfi");
-    }
+    @panic("booted!");
 }
 
 const sbi = struct {
