@@ -1,3 +1,25 @@
+const std = @import("std");
+const log = std.log.scoped(.kernel);
+
+pub const std_options: std.Options = blk: {
+    const funcs = struct {
+        fn logFn(
+            comptime level: std.log.Level,
+            comptime scope: @TypeOf(.enum_literal),
+            comptime format: []const u8,
+            args: anytype,
+        ) void {
+            const level_text = comptime level.asText();
+            const scope_text = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
+            var writer = sbi.console.writer();
+            writer.print(level_text ++ scope_text ++ format ++ "\n", args) catch {};
+        }
+    };
+    break :blk .{
+        .logFn = funcs.logFn,
+    };
+};
+
 // idk why, but `extern` keyword doesn't work properly
 const bss = @extern([*]u8, .{ .name = "__bss" });
 const bss_end = @extern([*]u8, .{ .name = "__bss_end" });
@@ -16,9 +38,8 @@ export fn kernelMain() noreturn {
     const bss_section = bss[0 .. @intFromPtr(bss_end) - @intFromPtr(bss)];
     @memset(bss_section, 0);
 
-    for ("\n\nHello World!\n") |c| {
-        sbi.console.putChar(c);
-    }
+    sbi.console.putChar('\n');
+    log.info("Hello {s}!", .{"World"});
 
     while (true) {
         asm volatile ("wfi");
@@ -65,6 +86,30 @@ const sbi = struct {
     const console = struct {
         fn putChar(char: u8) void {
             _ = call(@intCast(char), 0, 0, 0, 0, 0, 0, 1);
+        }
+
+        fn writer() std.Io.Writer {
+            return .{
+                .buffer = &.{},
+                .vtable = &.{
+                    .drain = drain,
+                    .flush = std.Io.Writer.noopFlush,
+                },
+            };
+        }
+
+        fn drain(_: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+            var written: usize = 0;
+            for (data) |bytes| {
+                written += bytes.len;
+                for (bytes) |char| putChar(char);
+            }
+            const last = data[data.len - 1];
+            written += last.len * (splat - 1);
+            for (0..(splat - 1)) |_| {
+                for (last) |char| putChar(char);
+            }
+            return written;
         }
     };
 };
