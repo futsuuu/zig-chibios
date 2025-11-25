@@ -7,6 +7,7 @@ pub const panic = blk: {
             @branchHint(.cold);
             _ = first_trace_addr;
             log.err("PANIC: {s}", .{msg});
+            // _ = sbi.system.reset(.shutdown, .system_failure);
             while (true) asm volatile ("wfi");
         }
     }.panic);
@@ -50,13 +51,16 @@ export fn kernelMain() noreturn {
 
     writeCsr(.stvec, @intFromPtr(&kernelEntry));
 
-    log.info("Hello {s}!", .{"World"});
+    sbi.console.putChar('\n');
+    log.debug("Hello {s}!", .{"World"});
 
     const allocator = ram.bump_allocator;
-    log.debug("allocator test: {*}", .{allocator.alloc(u8, 0x2000) catch @panic("OOM")});
-    log.debug("allocator test: {*}", .{allocator.alloc(u8, 0x1000) catch @panic("OOM")});
+    log.info("allocator test: {*}", .{allocator.alloc(u8, 0x2000) catch @panic("OOM")});
+    log.info("allocator test: {*}", .{allocator.alloc(u8, 0x1000) catch @panic("OOM")});
 
-    @panic("booted!");
+    log.debug("shutting down...", .{});
+    _ = sbi.system.reset(.shutdown, .no_reason);
+    @panic("unreachable");
 }
 
 fn kernelEntry() align(4) callconv(.naked) noreturn {
@@ -277,6 +281,25 @@ const sbi = struct {
             .val = val,
         };
     }
+
+    const system = struct {
+        const ResetType = enum(u32) {
+            shutdown = 0x00,
+            cold_reboot = 0x01,
+            warm_reboot = 0x02,
+            _,
+        };
+
+        const ResetReason = enum(u32) {
+            no_reason = 0x00,
+            system_failure = 0x01,
+            _,
+        };
+
+        fn reset(ty: ResetType, reason: ResetReason) Ret {
+            return call(@intFromEnum(ty), @intFromEnum(reason), 0, 0, 0, 0, 0, 0x53525354);
+        }
+    };
 
     const console = struct {
         fn putChar(char: u8) void {
