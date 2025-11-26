@@ -46,21 +46,47 @@ export fn _start() linksection(".text.boot") callconv(.naked) noreturn {
     );
 }
 
+var proc_a: *Process = undefined;
+var proc_b: *Process = undefined;
+
 export fn kernelMain() noreturn {
     @memset(bss[0 .. @intFromPtr(bss_end) - @intFromPtr(bss)], 0);
 
     writeCsr(.stvec, @intFromPtr(&kernelEntry));
 
     sbi.console.putChar('\n');
-    log.debug("Hello {s}!", .{"World"});
 
-    const allocator = ram.bump_allocator;
-    log.info("allocator test: {*}", .{allocator.alloc(u8, 0x2000) catch @panic("OOM")});
-    log.info("allocator test: {*}", .{allocator.alloc(u8, 0x1000) catch @panic("OOM")});
+    proc_a = Process.create(@intFromPtr(&procAEntry));
+    proc_b = Process.create(@intFromPtr(&procBEntry));
+    procAEntry();
 
     log.debug("shutting down...", .{});
     _ = sbi.system.reset(.shutdown, .no_reason);
     @panic("unreachable");
+}
+
+fn delay() void {
+    for (0..30000000) |_| {
+        asm volatile ("nop");
+    }
+}
+
+fn procAEntry() void {
+    log.debug("starting process A", .{});
+    while (true) {
+        sbi.console.putChar('A');
+        switchContext(&proc_a.sp, &proc_b.sp);
+        delay();
+    }
+}
+
+fn procBEntry() void {
+    log.debug("starting process B", .{});
+    while (true) {
+        sbi.console.putChar('B');
+        switchContext(&proc_b.sp, &proc_a.sp);
+        delay();
+    }
 }
 
 fn kernelEntry() align(4) callconv(.naked) noreturn {
@@ -194,6 +220,97 @@ inline fn writeCsr(comptime reg: @Type(.enum_literal), value: usize) void {
     );
 }
 
+const Process = struct {
+    state: State = .unused,
+    pid: usize = undefined,
+    sp: usize = undefined,
+    stack: [8192]u8 = undefined,
+
+    const State = enum { unused, runnable };
+
+    const procs_max = 8;
+    var procs: [procs_max]Process = .{Process{}} ** procs_max;
+
+    fn create(pc: usize) *Process {
+        var proc: *Process = &procs[0];
+        var pid: usize = 0;
+        for (&procs) |*p| {
+            pid += 1;
+            if (p.state == .unused) {
+                proc = p;
+                break;
+            }
+        }
+        if (proc.state != .unused) {
+            @panic("no free process slots");
+        }
+        var sp: usize = @intFromPtr(&proc.stack[proc.stack.len - 1]);
+        inline for ([_][]const u8 {
+            "s11",
+            "s10",
+            "s9",
+            "s8",
+            "s7",
+            "s6",
+            "s5",
+            "s4",
+            "s3",
+            "s2",
+            "s1",
+            "s0",
+        }) |_| {
+            @as(*usize, @ptrFromInt(sp)).* = 0;
+            sp -= @sizeOf(usize);
+        }
+        @as(*usize, @ptrFromInt(sp)).* = pc; // ra
+        proc.pid = pid;
+        proc.state = .runnable;
+        proc.sp = sp;
+        return proc;
+    }
+};
+
+noinline fn switchContext(prev: *u32, next: *u32) void {
+    asm volatile (
+        \\ addi sp, sp, -13 * 4
+        \\ sw ra,  0  * 4(sp)
+        \\ sw s0,  1  * 4(sp)
+        \\ sw s1,  2  * 4(sp)
+        \\ sw s2,  3  * 4(sp)
+        \\ sw s3,  4  * 4(sp)
+        \\ sw s4,  5  * 4(sp)
+        \\ sw s5,  6  * 4(sp)
+        \\ sw s6,  7  * 4(sp)
+        \\ sw s7,  8  * 4(sp)
+        \\ sw s8,  9  * 4(sp)
+        \\ sw s9,  10 * 4(sp)
+        \\ sw s10, 11 * 4(sp)
+        \\ sw s11, 12 * 4(sp)
+        \\
+        \\ sw sp, (%[prev])
+        \\ lw sp, (%[next])
+        \\
+        \\ lw ra,  0  * 4(sp)
+        \\ lw s0,  1  * 4(sp)
+        \\ lw s1,  2  * 4(sp)
+        \\ lw s2,  3  * 4(sp)
+        \\ lw s3,  4  * 4(sp)
+        \\ lw s4,  5  * 4(sp)
+        \\ lw s5,  6  * 4(sp)
+        \\ lw s6,  7  * 4(sp)
+        \\ lw s7,  8  * 4(sp)
+        \\ lw s8,  9  * 4(sp)
+        \\ lw s9,  10 * 4(sp)
+        \\ lw s10, 11 * 4(sp)
+        \\ lw s11, 12 * 4(sp)
+        \\ addi sp, sp, 13 * 4
+        \\ ret
+        :
+        : [prev] "{a0}" (prev),
+          [next] "{a1}" (next),
+    );
+}
+
 const ram = struct {
     const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
     const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
@@ -241,7 +358,6 @@ const ram = struct {
         fn free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {
             @panic("BumpAllocator does not support free() method");
         }
-
     };
 };
 
