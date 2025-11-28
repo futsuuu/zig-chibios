@@ -6,7 +6,6 @@ apt-get install -y --no-install-recommends \
   ca-certificates \
   curl \
   xz-utils \
-  llvm \
   qemu-system-riscv32
 EOF
 
