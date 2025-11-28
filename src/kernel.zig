@@ -56,8 +56,8 @@ export fn kernelMain() noreturn {
 
     sbi.console.putChar('\n');
 
-    proc_a = Process.create(@intFromPtr(&procAEntry));
-    proc_b = Process.create(@intFromPtr(&procBEntry));
+    proc_a = .create(@intFromPtr(&procAEntry));
+    proc_b = .create(@intFromPtr(&procBEntry));
     procAEntry();
 
     log.debug("shutting down...", .{});
@@ -90,25 +90,29 @@ fn procBEntry() void {
 }
 
 const Process = struct {
-    state: State = .unused,
-    pid: usize = undefined,
-    sp: *u8 = undefined,
-    stack: [8192]u8 align(@alignOf(usize)) = undefined,
+    state: State,
+    pid: usize,
+    sp: *u8,
+    stack: [8192]u8 align(@alignOf(usize)),
 
     const State = enum { unused, runnable };
 
     const Self = @This();
 
-    const procs_max = 8;
-    var procs: [procs_max]Process = .{Process{}} ** procs_max;
+    var buf: [8]Process = undefined;
+    var pool: std.ArrayList(Process) = .initBuffer(&buf);
 
     fn create(pc: usize) *Self {
-        const proc: *Process = blk: for (&procs, 1..) |*proc, pid| {
-            if (proc.state != .unused) continue;
-            proc.pid = pid;
-            break :blk proc;
+        const proc: *Process = blk: for (pool.items) |*p| {
+            if (p.state == .unused) break :blk p;
         } else {
-            @panic("no free process slots");
+            pool.appendBounded(.{
+                .state = .unused,
+                .pid = pool.items.len,
+                .sp = undefined,
+                .stack = undefined,
+            }) catch @panic("no free process slots");
+            break :blk &pool.items[pool.items.len - 1];
         };
         proc.state = .runnable;
         //  | ...
