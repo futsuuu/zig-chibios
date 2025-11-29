@@ -46,9 +46,6 @@ export fn _start() linksection(".text.boot") callconv(.naked) noreturn {
     );
 }
 
-var proc_a: *Process = undefined;
-var proc_b: *Process = undefined;
-
 export fn kernelMain() noreturn {
     @memset(bss[0 .. @intFromPtr(bss_end) - @intFromPtr(bss)], 0);
 
@@ -56,9 +53,10 @@ export fn kernelMain() noreturn {
 
     sbi.console.putChar('\n');
 
-    proc_a = .create(@intFromPtr(&procAEntry));
-    proc_b = .create(@intFromPtr(&procBEntry));
-    procAEntry();
+    Process.initGlobal();
+    _ = Process.create(@intFromPtr(&procAEntry));
+    _ = Process.create(@intFromPtr(&procBEntry));
+    Process.yield();
 
     log.debug("shutting down...", .{});
     _ = sbi.system.reset(.shutdown, .no_reason);
@@ -75,7 +73,7 @@ fn procAEntry() void {
     log.debug("starting process A", .{});
     while (true) {
         sbi.console.putChar('A');
-        proc_a.switchContext(proc_b);
+        Process.yield();
         delay();
     }
 }
@@ -84,7 +82,7 @@ fn procBEntry() void {
     log.debug("starting process B", .{});
     while (true) {
         sbi.console.putChar('B');
-        proc_b.switchContext(proc_a);
+        Process.yield();
         delay();
     }
 }
@@ -137,7 +135,7 @@ const Process = struct {
         return proc;
     }
 
-    noinline fn switchContext(self: *Self, next: *Self) void {
+    inline fn switchContext(self: *Self, next: *Self) void {
         asm volatile (
             \\
             // | ...
@@ -200,7 +198,33 @@ const Process = struct {
             :
             : [self] "r" (&self.sp),
               [next] "r" (&next.sp),
+            : .{ .memory = true });
+    }
+
+    var current: *Self = undefined;
+    var idle: *Self = undefined;
+
+    fn initGlobal() void {
+        idle = create(0);
+        current = idle;
+    }
+
+    noinline fn yield() void {
+        const current_idx = (@intFromPtr(current) - @intFromPtr(&pool.items)) / @sizeOf(Self);
+        const next: *Self = for (current_idx + 1..current_idx + pool.items.len) |i| {
+            const proc = &pool.items[i % pool.items.len];
+            if (proc.state == .runnable and proc != idle) break proc;
+        } else {
+            return;
+        };
+        asm volatile (
+            \\ csrw sscratch, %[sscratch]
+            :
+            : [sscratch] "r" (@intFromPtr(&next.stack) + @sizeOf(u8) * next.stack.len),
         );
+        const prev = current;
+        current = next;
+        prev.switchContext(next);
     }
 };
 
@@ -356,7 +380,8 @@ inline fn writeCsr(comptime reg: @Type(.enum_literal), value: usize) void {
 
 fn kernelEntry() align(4) callconv(.naked) noreturn {
     asm volatile (
-        \\ csrw sscratch, sp
+        \\ csrrw sp, sscratch, sp
+        \\
         \\ addi sp, sp, -4 * 31
         \\ sw ra,  4 * 0(sp)
         \\ sw gp,  4 * 1(sp)
@@ -391,6 +416,9 @@ fn kernelEntry() align(4) callconv(.naked) noreturn {
         \\
         \\ csrr a0, sscratch
         \\ sw a0,  4 * 30(sp)
+        \\
+        \\ addi a0, sp, 4 * 31
+        \\ csrw sscratch, a0
         \\
         \\ mv a0, sp
         \\ call handleTrap
