@@ -53,14 +53,15 @@ export fn kernelMain() noreturn {
 
     sbi.console.putChar('\n');
 
-    Process.initGlobal();
-    _ = Process.create(@intFromPtr(&procAEntry));
-    _ = Process.create(@intFromPtr(&procBEntry));
+    const a = ram.bump_allocator;
+    Process.initGlobal(a);
+    _ = Process.create(a, @intFromPtr(&procAEntry));
+    _ = Process.create(a, @intFromPtr(&procBEntry));
     Process.yield();
 
     log.debug("shutting down...", .{});
     _ = sbi.system.reset(.shutdown, .no_reason);
-    @panic("unreachable");
+    unreachable;
 }
 
 fn delay() void {
@@ -91,6 +92,7 @@ const Process = struct {
     state: State,
     pid: usize,
     sp: *u8,
+    page_table: *sv32.PageTable,
     stack: [8192]u8 align(@alignOf(usize)),
 
     const State = enum { unused, runnable };
@@ -100,7 +102,7 @@ const Process = struct {
     var buf: [8]Process = undefined;
     var pool: std.ArrayList(Process) = .initBuffer(&buf);
 
-    fn create(pc: usize) *Self {
+    fn create(a: std.mem.Allocator, pc: usize) *Self {
         const proc: *Process = blk: for (pool.items) |*p| {
             if (p.state == .unused) break :blk p;
         } else {
@@ -108,10 +110,12 @@ const Process = struct {
                 .state = .unused,
                 .pid = pool.items.len,
                 .sp = undefined,
+                .page_table = undefined,
                 .stack = undefined,
             }) catch @panic("no free process slots");
             break :blk &pool.items[pool.items.len - 1];
         };
+
         proc.state = .runnable;
         //  | ...
         //  |-----> proc.sp
@@ -132,6 +136,11 @@ const Process = struct {
             casted_stack[i] = 0;
         }
         proc.sp = @ptrCast(&casted_stack[casted_stack.len - 13]);
+
+        const page_table: *sv32.PageTable = .init(a);
+        page_table.mapKernelPage(a);
+        proc.page_table = page_table;
+
         return proc;
     }
 
@@ -204,8 +213,8 @@ const Process = struct {
     var current: *Self = undefined;
     var idle: *Self = undefined;
 
-    fn initGlobal() void {
-        idle = create(0);
+    fn initGlobal(a: std.mem.Allocator) void {
+        idle = create(a, 0);
         current = idle;
     }
 
@@ -218,14 +227,135 @@ const Process = struct {
             return;
         };
         asm volatile (
+            \\ sfence.vma
+            \\ csrw satp, %[satp]
+            \\ sfence.vma
             \\ csrw sscratch, %[sscratch]
             :
-            : [sscratch] "r" (@intFromPtr(&next.stack) + @sizeOf(u8) * next.stack.len),
+            : [satp] "r" (next.page_table.getSatpValue()),
+              [sscratch] "r" (@intFromPtr(&next.stack) + @sizeOf(u8) * next.stack.len),
         );
         const prev = current;
         current = next;
         prev.switchContext(next);
     }
+};
+
+const sv32 = struct {
+    const Satp = packed struct(u32) {
+        ppn: u22,
+        asid: u9 = 0,
+        mode: u1 = 1,
+    };
+
+    const kernel_page = @extern([*]usize, .{ .name = "__kernel_page" });
+    const kernel_page_end = @extern([*]usize, .{ .name = "__kernel_page_end" });
+
+    const PageTable = struct {
+        entries: [entry_count]Entry,
+
+        const entry_count = (1 << 12) / @sizeOf(Entry);
+
+        fn init(a: std.mem.Allocator) *PageTable {
+            const entries = a.alignedAlloc(
+                Entry,
+                .fromByteUnits(@sizeOf(PageTable)),
+                entry_count,
+            ) catch @panic("OOM");
+            return @ptrCast(entries.ptr);
+        }
+
+        inline fn getSatpValue(self: *const PageTable) Satp {
+            return .{
+                .ppn = @truncate(@intFromPtr(self) / @sizeOf(PageTable)),
+            };
+        }
+
+        fn getAddr(self: *PageTable) PhysAddr {
+            return @bitCast(@as(u34, @intCast(@intFromPtr(self))));
+        }
+
+        fn fromAddr(paddr: PhysAddr) *PageTable {
+            return @ptrFromInt(@as(usize, @truncate(@as(u34, @bitCast(paddr)))));
+        }
+
+        fn mapKernelPage(table1: *PageTable, a: std.mem.Allocator) void {
+            var paddr = @intFromPtr(kernel_page);
+            while (paddr < @intFromPtr(kernel_page_end)) : (paddr += @sizeOf(PageTable)) {
+                table1.mapPage(
+                    a,
+                    @bitCast(paddr),
+                    @bitCast(@as(u34, @intCast(paddr))),
+                    .{ .readable = true, .writable = true, .executable = true },
+                );
+            }
+        }
+
+        fn mapPage(
+            table1: *PageTable,
+            a: std.mem.Allocator,
+            virt_addr: VirtAddr,
+            phys_addr: PhysAddr,
+            flags: Entry.Flags,
+        ) void {
+            std.debug.assert(virt_addr.offset == 0);
+            const entry1 = &table1.entries[@intCast(virt_addr.vpn1)];
+            if (!entry1.flags.valid) {
+                const table0: *PageTable = .init(a);
+                entry1.* = .init(table0.getAddr(), .{});
+            }
+            const table0: *PageTable = .fromAddr(entry1.getAddr());
+            const entry0 = &table0.entries[@intCast(virt_addr.vpn0)];
+            entry0.* = .init(phys_addr, flags);
+        }
+
+        const Entry = packed struct(u32) {
+            flags: Flags,
+            ppn0: u10,
+            ppn1: u12,
+
+            const Flags = packed struct {
+                valid: bool = true,
+                readable: bool = false,
+                writable: bool = false,
+                executable: bool = false,
+                usermode: bool = false,
+                global: bool = false,
+                accessed: bool = false,
+                dirty: bool = false,
+                _: u2 = 0,
+            };
+
+            fn init(paddr: PhysAddr, flags: Flags) Entry {
+                std.debug.assert(paddr.offset == 0);
+                return .{
+                    .flags = flags,
+                    .ppn0 = paddr.ppn0,
+                    .ppn1 = paddr.ppn1,
+                };
+            }
+
+            fn getAddr(self: Entry) PhysAddr {
+                return .{
+                    .offset = 0,
+                    .ppn0 = self.ppn0,
+                    .ppn1 = self.ppn1,
+                };
+            }
+        };
+    };
+
+    const VirtAddr = packed struct(u32) {
+        offset: u12,
+        vpn0: u10,
+        vpn1: u10,
+    };
+
+    const PhysAddr = packed struct(u34) {
+        offset: u12,
+        ppn0: u10,
+        ppn1: u12,
+    };
 };
 
 const ram = struct {

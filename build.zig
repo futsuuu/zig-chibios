@@ -49,6 +49,10 @@ pub fn build(b: *std.Build) void {
         "-serial",
         "mon:stdio",
         "--no-reboot",
+        "-d",
+        "unimp,guest_errors,int,cpu_reset",
+        "-D",
+        "qemu.log",
         "-kernel",
         b.getInstallPath(.bin, kernel.name),
     });

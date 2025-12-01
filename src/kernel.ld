@@ -1,5 +1,9 @@
+/* Zig actually ignores ENTRY section in the linker script, but I keep it just in case. */
+ENTRY(_start)
+
 SECTIONS {
   . = 0x80200000;
+  __kernel_page = .;
 
   .text :{
     KEEP(*(.text.boot));
@@ -28,4 +32,6 @@ SECTIONS {
   __free_ram = .;
   . += 64 * 1024 * 1024;  /* 64MB */
   __free_ram_end = .;
+
+  __kernel_page_end = .;
 }
