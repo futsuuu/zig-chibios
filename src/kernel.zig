@@ -53,10 +53,11 @@ export fn kernelMain() noreturn {
 
     sbi.console.putChar('\n');
 
-    const a = ram.bump_allocator;
-    Process.initGlobal(a);
-    _ = Process.create(a, @intFromPtr(&procAEntry));
-    _ = Process.create(a, @intFromPtr(&procBEntry));
+    var fba = ram.fixedBufferAllocator();
+    const pt_allocator = fba.allocator();
+    Process.initGlobal(pt_allocator);
+    _ = Process.create(@intFromPtr(&procAEntry), pt_allocator);
+    _ = Process.create(@intFromPtr(&procBEntry), pt_allocator);
     Process.yield();
 
     log.debug("shutting down...", .{});
@@ -102,7 +103,11 @@ const Process = struct {
     var buf: [8]Process = undefined;
     var pool: std.ArrayList(Process) = .initBuffer(&buf);
 
-    fn create(a: std.mem.Allocator, pc: usize) *Self {
+    fn create(
+        pc: usize,
+        /// only used for allocating page tables
+        pt_allocator: std.mem.Allocator,
+    ) *Self {
         const proc: *Process = blk: for (pool.items) |*p| {
             if (p.state == .unused) break :blk p;
         } else {
@@ -137,8 +142,8 @@ const Process = struct {
         }
         proc.sp = @ptrCast(&casted_stack[casted_stack.len - 13]);
 
-        const page_table: *sv32.PageTable = .init(a);
-        page_table.mapKernelPage(a);
+        const page_table: *sv32.PageTable = .init(pt_allocator);
+        page_table.mapKernelPage(pt_allocator);
         proc.page_table = page_table;
 
         return proc;
@@ -224,8 +229,8 @@ const Process = struct {
     var current: *Self = undefined;
     var idle: *Self = undefined;
 
-    fn initGlobal(a: std.mem.Allocator) void {
-        idle = create(a, 0);
+    fn initGlobal(pt_allocator: std.mem.Allocator) void {
+        idle = create(0, pt_allocator);
         current = idle;
     }
 
@@ -373,50 +378,10 @@ const ram = struct {
     const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
     const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
 
-    const bump_allocator: std.mem.Allocator = .{
-        .ptr = &BumpAllocator.singleton,
-        .vtable = &BumpAllocator.vtable,
-    };
-
-    const BumpAllocator = struct {
-        allocated: usize = 0,
-
-        const Self = @This();
-        var singleton: Self = .{};
-
-        const vtable: std.mem.Allocator.VTable = .{
-            .alloc = alloc,
-            .remap = remap,
-            .resize = resize,
-            .free = free,
-        };
-
-        fn alloc(a: *anyopaque, len: usize, alignment: std.mem.Alignment, ret_addr: usize) ?[*]u8 {
-            _ = ret_addr;
-            std.debug.assert(len > 0);
-            const self: *Self = @ptrCast(@alignCast(a));
-            const base = @intFromPtr(free_ram);
-            const start = alignment.forward(base + self.allocated);
-            const end = start + len;
-            if (end > @intFromPtr(free_ram_end)) return null;
-            self.allocated = end - base;
-            const ptr: [*]u8 = @ptrFromInt(start);
-            @memset(ptr[0..len], 0);
-            return ptr;
-        }
-
-        fn remap(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) ?[*]u8 {
-            @panic("BumpAllocator does not support remap() method");
-        }
-
-        fn resize(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize, _: usize) bool {
-            @panic("BumpAllocator does not support resize() method");
-        }
-
-        fn free(_: *anyopaque, _: []u8, _: std.mem.Alignment, _: usize) void {
-            @panic("BumpAllocator does not support free() method");
-        }
-    };
+    fn fixedBufferAllocator() std.heap.FixedBufferAllocator {
+        const buf = free_ram[0 .. @intFromPtr(free_ram_end) - @intFromPtr(free_ram)];
+        return .init(buf);
+    }
 };
 
 const sbi = struct {
