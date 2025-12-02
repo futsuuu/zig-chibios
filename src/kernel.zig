@@ -144,7 +144,19 @@ const Process = struct {
         return proc;
     }
 
-    inline fn switchContext(self: *Self, next: *Self) void {
+    fn switchContext(self: *Self, next: *Self) void {
+        asm volatile ("jalr %[inner]"
+            :
+            : [self] "{a0}" (self),
+              [next] "{a1}" (next),
+              [inner] "r" (&switchContextInner),
+            : .{ .x1 = true }); // ra
+    }
+
+    fn switchContextInner(
+        // self: *Self,
+        // next: *Self,
+    ) callconv(.naked) noreturn {
         asm volatile (
             \\
             // | ...
@@ -174,9 +186,9 @@ const Process = struct {
             \\ sw s11, 12 * 4(sp)
 
             // self.sp = sp
-            \\ sw sp, (%[self])
+            \\ sw sp, %[sp_offset](a0)
             // sp = next.sp
-            \\ lw sp, (%[next])
+            \\ lw sp, %[sp_offset](a1)
 
             // | ...
             // |-----> next.sp
@@ -205,8 +217,7 @@ const Process = struct {
             \\ addi sp, sp, 13 * 4
             \\ ret
             :
-            : [self] "r" (&self.sp),
-              [next] "r" (&next.sp),
+            : [sp_offset] "I" (@offsetOf(Self, "sp")),
             : .{ .memory = true });
     }
 
@@ -218,7 +229,7 @@ const Process = struct {
         current = idle;
     }
 
-    noinline fn yield() void {
+    fn yield() void {
         const current_idx = (@intFromPtr(current) - @intFromPtr(&pool.items)) / @sizeOf(Self);
         const next: *Self = for (current_idx + 1..current_idx + pool.items.len) |i| {
             const proc = &pool.items[i % pool.items.len];
@@ -265,7 +276,7 @@ const sv32 = struct {
             return @ptrCast(entries.ptr);
         }
 
-        inline fn getSatpValue(self: *const PageTable) Satp {
+        fn getSatpValue(self: *const PageTable) Satp {
             return .{
                 .ppn = @truncate(@intFromPtr(self) / @sizeOf(PageTable)),
             };
