@@ -10,20 +10,13 @@ pub fn build(b: *std.Build) void {
         .preferred_optimize_mode = .ReleaseSmall,
     });
 
-    const mod = b.addModule("chibios", .{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-    });
-
     const kernel = b.addExecutable(.{
         .name = "kernel.elf",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/kernel.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{
-                .{ .name = "chibios", .module = mod },
-            },
+            .imports = &.{},
             .no_builtin = true,
             .strip = false,
             .stack_protector = false,
@@ -31,9 +24,9 @@ pub fn build(b: *std.Build) void {
         .use_lld = true,
     });
     kernel.setLinkerScript(b.path("src/kernel.ld"));
-
     b.installArtifact(kernel);
 
+    const run_step = b.step("run", "Run the kernel with QEMU");
     const qemu = switch (target.result.cpu.arch) {
         .riscv32 => "qemu-system-riscv32",
         .riscv64 => "qemu-system-riscv64",
@@ -57,20 +50,12 @@ pub fn build(b: *std.Build) void {
         b.getInstallPath(.bin, kernel.name),
     });
     run_cmd.step.dependOn(b.getInstallStep());
-    const run_step = b.step("run", "Run the kernel with QEMU");
     run_step.dependOn(&run_cmd.step);
 
-    const mod_tests = b.addTest(.{
-        .root_module = mod,
-    });
-    const run_mod_tests = b.addRunArtifact(mod_tests);
-
+    const test_step = b.step("test", "Run tests");
     const kernel_tests = b.addTest(.{
         .root_module = kernel.root_module,
     });
     const run_kernel_tests = b.addRunArtifact(kernel_tests);
-
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_kernel_tests.step);
 }
