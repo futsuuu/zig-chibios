@@ -2,7 +2,7 @@ const std = @import("std");
 
 const sv32 = @import("sv32.zig");
 
-const Self = @This();
+const Process = @This();
 
 state: State,
 pid: usize,
@@ -12,28 +12,18 @@ stack: [8192]u8 align(@alignOf(usize)),
 
 const State = enum { unused, runnable };
 
-var buf: [8]Self = undefined;
-var pool: std.ArrayList(Self) = .initBuffer(&buf);
-
-pub fn create(
-    pc: usize,
-    /// only used for allocating page tables
-    pt_allocator: std.mem.Allocator,
-) *Self {
-    const proc: *Self = blk: for (pool.items) |*p| {
-        if (p.state == .unused) break :blk p;
-    } else {
-        pool.appendBounded(.{
-            .state = .unused,
-            .pid = pool.items.len,
-            .sp = undefined,
-            .page_table = undefined,
-            .stack = undefined,
-        }) catch @panic("no free process slots");
-        break :blk &pool.items[pool.items.len - 1];
+fn new(pid: usize) Process {
+    return .{
+        .state = .unused,
+        .pid = pid,
+        .sp = undefined,
+        .page_table = undefined,
+        .stack = undefined,
     };
+}
 
-    proc.state = .runnable;
+pub fn reset(self: *Process, pc: usize, pt_allocator: std.mem.Allocator) void {
+    self.state = .runnable;
     //  | ...
     //  |-----> proc.sp
     //  | pc    // -> ra
@@ -45,23 +35,30 @@ pub fn create(
     //  | 0     // -> s11
     //  `-----
     const casted_stack = blk: {
-        var ptr: [*]usize = @ptrCast(&proc.stack);
-        break :blk ptr[0 .. proc.stack.len * @sizeOf(u8) / @sizeOf(usize)];
+        var ptr: [*]usize = @ptrCast(&self.stack);
+        break :blk ptr[0 .. self.stack.len * @sizeOf(u8) / @sizeOf(usize)];
     };
     casted_stack[casted_stack.len - 13] = pc;
     for (casted_stack.len - 12..casted_stack.len) |i| {
         casted_stack[i] = 0;
     }
-    proc.sp = @ptrCast(&casted_stack[casted_stack.len - 13]);
+    self.sp = @ptrCast(&casted_stack[casted_stack.len - 13]);
 
     const page_table: *sv32.PageTable = .init(pt_allocator);
     page_table.mapKernelPage(pt_allocator);
-    proc.page_table = page_table;
-
-    return proc;
+    self.page_table = page_table;
 }
 
-pub fn switchContext(self: *Self, next: *Self) void {
+fn switchContext(self: *Process, next: *Process) void {
+    asm volatile (
+        \\ sfence.vma
+        \\ csrw satp, %[satp]
+        \\ sfence.vma
+        \\ csrw sscratch, %[sscratch]
+        :
+        : [satp] "r" (next.page_table.getSatpValue()),
+          [sscratch] "r" (@intFromPtr(&next.stack) + @sizeOf(u8) * next.stack.len),
+    );
     asm volatile ("jalr %[inner]"
         :
         : [self] "{a0}" (self),
@@ -134,36 +131,67 @@ fn switchContextInner(
         \\ addi sp, sp, 13 * 4
         \\ ret
         :
-        : [sp_offset] "I" (@offsetOf(Self, "sp")),
+        : [sp_offset] "I" (@offsetOf(Process, "sp")),
         : .{ .memory = true });
 }
 
-var current: *Self = undefined;
-var idle: *Self = undefined;
+pub const Scheduler = struct {
+    list: std.ArrayList(Process),
+    current: *Process,
+    idle: *Process,
 
-pub fn initGlobal(pt_allocator: std.mem.Allocator) void {
-    idle = create(0, pt_allocator);
-    current = idle;
-}
+    pt_allocator: std.mem.Allocator,
 
-pub fn yield() void {
-    const current_idx = (@intFromPtr(current) - @intFromPtr(&pool.items)) / @sizeOf(Self);
-    const next: *Self = for (current_idx + 1..current_idx + pool.items.len) |i| {
-        const proc = &pool.items[i % pool.items.len];
-        if (proc.state == .runnable and proc != idle) break proc;
-    } else {
-        return;
-    };
-    asm volatile (
-        \\ sfence.vma
-        \\ csrw satp, %[satp]
-        \\ sfence.vma
-        \\ csrw sscratch, %[sscratch]
-        :
-        : [satp] "r" (next.page_table.getSatpValue()),
-          [sscratch] "r" (@intFromPtr(&next.stack) + @sizeOf(u8) * next.stack.len),
-    );
-    const prev = current;
-    current = next;
-    prev.switchContext(next);
-}
+    pub fn init(buffer: []Process, pt_allocator: std.mem.Allocator) Scheduler {
+        std.debug.assert(1 <= buffer.len);
+        var list: std.ArrayList(Process) = .initBuffer(buffer);
+        list.appendAssumeCapacity(new(0));
+        var idle = &list.items[list.items.len - 1];
+        idle.reset(0, pt_allocator);
+        return .{
+            .list = list,
+            .idle = idle,
+            .current = idle,
+            .pt_allocator = pt_allocator,
+        };
+    }
+
+    pub fn spawn(self: *Scheduler, func: *const fn() void) !*Process {
+        const proc = self.getUnused() orelse try self.manage(.new(self.generatePid()));
+        proc.reset(@intFromPtr(func), self.pt_allocator);
+        return proc;
+    }
+
+    pub fn yield(self: *Scheduler) void {
+        const next = self.getNext() orelse return;
+        const prev = self.current;
+        self.current = next;
+        prev.switchContext(next);
+    }
+
+    fn getNext(self: *Scheduler) ?*Process {
+        const current_idx = self.current - self.list.items.ptr;
+        return for (0 .. current_idx) |i| {
+            const p = &self.list.items[i];
+            if (p.state == .runnable and p != self.idle) break p;
+        } else for (current_idx + 1 .. self.list.items.len) |i| {
+            const p = &self.list.items[i];
+            if (p.state == .runnable and p != self.idle) break p;
+        } else null;
+    }
+
+    fn getUnused(self: *Scheduler) ?*Process {
+        return for (self.list.items) |*p| {
+            if (p.state == .unused) break p;
+        } else null;
+    }
+
+    fn generatePid(self: *Scheduler) usize {
+        return self.list.items.len;
+    }
+
+    fn manage(self: *Scheduler, process: Process) !*Process {
+        try self.list.appendBounded(process);
+        return &self.list.items[self.list.items.len - 1];
+    }
+};

@@ -41,6 +41,8 @@ pub const std_options: std.Options = blk: {
     };
 };
 
+var scheduler: Process.Scheduler = undefined;
+
 pub fn main() void {
     sbi.console.putChar('\n');
 
@@ -49,10 +51,12 @@ pub fn main() void {
     const buf = free_ram[0 .. free_ram_end - free_ram];
     var fba: std.heap.FixedBufferAllocator = .init(buf);
     const pt_allocator = fba.allocator();
-    Process.initGlobal(pt_allocator);
-    _ = Process.create(@intFromPtr(&procAEntry), pt_allocator);
-    _ = Process.create(@intFromPtr(&procBEntry), pt_allocator);
-    Process.yield();
+
+    var proc_buf: [8]Process = undefined;
+    scheduler = .init(&proc_buf, pt_allocator);
+    _ = scheduler.spawn(&procAEntry) catch unreachable;
+    _ = scheduler.spawn(&procBEntry) catch unreachable;
+    scheduler.yield();
 
     log.info("exit", .{});
 }
@@ -67,7 +71,7 @@ fn procAEntry() void {
     log.debug("starting process A", .{});
     while (true) {
         sbi.console.putChar('A');
-        Process.yield();
+        scheduler.yield();
         delay();
     }
 }
@@ -76,7 +80,7 @@ fn procBEntry() void {
     log.debug("starting process B", .{});
     while (true) {
         sbi.console.putChar('B');
-        Process.yield();
+        scheduler.yield();
         delay();
     }
 }
