@@ -5,17 +5,15 @@ const sv32 = @import("sv32.zig");
 const Process = @This();
 
 state: State,
-pid: usize,
 sp: *u8,
 page_table: *sv32.PageTable,
 stack: [8192]u8 align(@alignOf(usize)),
 
 const State = enum { unused, runnable };
 
-fn new(pid: usize) Process {
+fn new() Process {
     return .{
         .state = .unused,
-        .pid = pid,
         .sp = undefined,
         .page_table = undefined,
         .stack = undefined,
@@ -150,7 +148,7 @@ pub const Scheduler = struct {
     pub fn init(buffer: []Process, pt_allocator: std.mem.Allocator) Scheduler {
         std.debug.assert(1 <= buffer.len);
         var list: std.ArrayList(Process) = .initBuffer(buffer);
-        list.appendAssumeCapacity(new(0));
+        list.appendAssumeCapacity(.new());
         var idle = &list.items[list.items.len - 1];
         idle.reset(0, pt_allocator);
         return .{
@@ -162,7 +160,7 @@ pub const Scheduler = struct {
     }
 
     pub fn spawn(self: *Scheduler, func: *const fn() void) !*Process {
-        const proc = self.getUnused() orelse try self.manage(.new(self.generatePid()));
+        const proc = self.getUnused() orelse try self.manage(.new());
         proc.reset(@intFromPtr(func), self.pt_allocator);
         return proc;
     }
@@ -189,10 +187,6 @@ pub const Scheduler = struct {
         return for (self.list.items) |*p| {
             if (p.state == .unused) break p;
         } else null;
-    }
-
-    fn generatePid(self: *Scheduler) usize {
-        return self.list.items.len;
     }
 
     fn manage(self: *Scheduler, process: Process) !*Process {
