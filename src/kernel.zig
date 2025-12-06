@@ -1,10 +1,10 @@
 const std = @import("std");
 const log = std.log.scoped(.kernel);
 
-const Process = @import("Process.zig");
-const exception = @import("exception.zig");
-const sbi = @import("sbi.zig");
-const sv32 = @import("sv32.zig");
+pub const Process = @import("Process.zig");
+pub const exception = @import("exception.zig");
+pub const sbi = @import("sbi.zig");
+pub const sv32 = @import("sv32.zig");
 
 comptime {
     _ = @import("start.zig");
@@ -41,15 +41,12 @@ pub const std_options: std.Options = blk: {
     };
 };
 
-const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
-const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
-
 pub fn main() void {
-    exception.initHandler();
-
     sbi.console.putChar('\n');
 
-    const buf = free_ram[0 .. @intFromPtr(free_ram_end) - @intFromPtr(free_ram)];
+    const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
+    const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
+    const buf = free_ram[0 .. free_ram_end - free_ram];
     var fba: std.heap.FixedBufferAllocator = .init(buf);
     const pt_allocator = fba.allocator();
     Process.initGlobal(pt_allocator);
@@ -82,4 +79,8 @@ fn procBEntry() void {
         Process.yield();
         delay();
     }
+}
+
+comptime {
+    std.testing.refAllDeclsRecursive(@This());
 }
