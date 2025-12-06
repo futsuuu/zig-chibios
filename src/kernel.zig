@@ -32,7 +32,7 @@ pub const std_options: std.Options = blk: {
         ) void {
             const level_text = comptime level.asText();
             const scope_text = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-            var writer = sbi.console.writer();
+            var writer = sbi.debug_console.writer();
             writer.print(level_text ++ scope_text ++ format ++ "\n", args) catch {};
         }
     };
@@ -44,7 +44,7 @@ pub const std_options: std.Options = blk: {
 var scheduler: Process.Scheduler = undefined;
 
 pub fn main() void {
-    sbi.console.putChar('\n');
+    sbi.debug_console.writeByte('\n') catch {};
 
     const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
     const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
@@ -70,7 +70,7 @@ fn delay() void {
 fn procAEntry() void {
     log.debug("starting process A", .{});
     while (true) {
-        sbi.console.putChar('A');
+        sbi.debug_console.writeByte('A') catch {};
         scheduler.yield();
         delay();
     }
@@ -79,7 +79,7 @@ fn procAEntry() void {
 fn procBEntry() void {
     log.debug("starting process B", .{});
     while (true) {
-        sbi.console.putChar('B');
+        sbi.debug_console.writeByte('B') catch {};
         scheduler.yield();
         delay();
     }

@@ -8,7 +8,7 @@ pub const panic = kernel.panic;
 pub const std_options = kernel.std_options;
 
 pub fn main() void {
-    kernel.sbi.console.putChar('\n');
+    kernel.sbi.debug_console.writeByte('\n') catch {};
 
     var has_err = false;
     for (@as([]const std.builtin.TestFn, builtin.test_functions)) |t| {
@@ -21,8 +21,8 @@ pub fn main() void {
         }
     }
 
-    kernel.sbi.console.putChar('\n');
     if (has_err) {
+        kernel.sbi.debug_console.writeByte('\n') catch {};
         VirtTest.mem.* = .{ .status = .fail, .code = 1 };
         while (true) asm volatile ("wfi");
     }

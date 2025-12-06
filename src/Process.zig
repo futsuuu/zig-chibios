@@ -159,7 +159,7 @@ pub const Scheduler = struct {
         };
     }
 
-    pub fn spawn(self: *Scheduler, func: *const fn() void) !*Process {
+    pub fn spawn(self: *Scheduler, func: *const fn () void) !*Process {
         const proc = self.getUnused() orelse try self.manage(.new());
         proc.reset(@intFromPtr(func), self.pt_allocator);
         return proc;
@@ -174,10 +174,10 @@ pub const Scheduler = struct {
 
     fn getNext(self: *Scheduler) ?*Process {
         const current_idx = self.current - self.list.items.ptr;
-        return for (0 .. current_idx) |i| {
+        return for (0..current_idx) |i| {
             const p = &self.list.items[i];
             if (p.state == .runnable and p != self.idle) break p;
-        } else for (current_idx + 1 .. self.list.items.len) |i| {
+        } else for (current_idx + 1..self.list.items.len) |i| {
             const p = &self.list.items[i];
             if (p.state == .runnable and p != self.idle) break p;
         } else null;
