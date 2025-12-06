@@ -44,9 +44,14 @@ pub fn reset(self: *Process, pc: usize, pt_allocator: std.mem.Allocator) void {
     }
     self.sp = @ptrCast(&casted_stack[casted_stack.len - 13]);
 
-    const page_table: *sv32.PageTable = .init(pt_allocator);
-    page_table.mapKernelPage(pt_allocator);
-    self.page_table = page_table;
+    const kernel_page = @extern([*]usize, .{ .name = "__kernel_page" });
+    const kernel_page_end = @extern([*]usize, .{ .name = "__kernel_page_end" });
+    const table1: *sv32.PageTable = .init(pt_allocator);
+    var paddr = @intFromPtr(kernel_page);
+    while (paddr < @intFromPtr(kernel_page_end)) : (paddr += @sizeOf(sv32.PageTable)) {
+        table1.mapPage(pt_allocator, paddr, @intCast(paddr), .rwx__);
+    }
+    self.page_table = table1;
 }
 
 fn switchContext(self: *Process, next: *Process) void {

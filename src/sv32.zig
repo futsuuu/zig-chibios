@@ -1,8 +1,5 @@
 const std = @import("std");
 
-const kernel_page = @extern([*]usize, .{ .name = "__kernel_page" });
-const kernel_page_end = @extern([*]usize, .{ .name = "__kernel_page_end" });
-
 pub const PageTable = struct {
     entries: [entry_count]Entry,
 
@@ -35,25 +32,15 @@ pub const PageTable = struct {
         return @ptrFromInt(@as(usize, @truncate(@as(u34, @bitCast(paddr)))));
     }
 
-    pub fn mapKernelPage(table1: *PageTable, a: std.mem.Allocator) void {
-        var paddr = @intFromPtr(kernel_page);
-        while (paddr < @intFromPtr(kernel_page_end)) : (paddr += @sizeOf(PageTable)) {
-            table1.mapPage(
-                a,
-                @bitCast(paddr),
-                @bitCast(@as(u34, @intCast(paddr))),
-                .{ .readable = true, .writable = true, .executable = true },
-            );
-        }
-    }
-
-    fn mapPage(
+    pub fn mapPage(
         table1: *PageTable,
         a: std.mem.Allocator,
-        virt_addr: VirtAddr,
-        phys_addr: PhysAddr,
+        vaddr: u32,
+        paddr: u34,
         flags: Entry.Flags,
     ) void {
+        const virt_addr: VirtAddr = @bitCast(vaddr);
+        const phys_addr: PhysAddr = @bitCast(paddr);
         std.debug.assert(virt_addr.offset == 0);
         const entry1 = &table1.entries[@intCast(virt_addr.vpn1)];
         if (!entry1.flags.valid) {
@@ -65,12 +52,12 @@ pub const PageTable = struct {
         entry0.* = .init(phys_addr, flags);
     }
 
-    const Entry = packed struct(u32) {
+    pub const Entry = packed struct(u32) {
         flags: Flags,
         ppn0: u10,
         ppn1: u12,
 
-        const Flags = packed struct {
+        pub const Flags = packed struct {
             valid: bool = true,
             readable: bool = false,
             writable: bool = false,
@@ -80,6 +67,8 @@ pub const PageTable = struct {
             accessed: bool = false,
             dirty: bool = false,
             _: u2 = 0,
+
+            pub const rwx__: Flags = .{ .readable = true, .writable = true, .executable = true };
         };
 
         fn init(paddr: PhysAddr, flags: Flags) Entry {
