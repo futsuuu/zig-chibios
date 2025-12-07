@@ -4,8 +4,21 @@ const log = std.log.scoped(.test_runner);
 
 const kernel = @import("kernel");
 
-pub const panic = kernel.panic;
-pub const std_options = kernel.std_options;
+pub const panic = blk: {
+    break :blk std.debug.FullPanic(struct {
+        fn panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
+            @branchHint(.cold);
+            _ = first_trace_addr;
+            log.err("PANIC: {s}", .{msg});
+            VirtTest.write(.{ .status = .fail, .code = 1 });
+        }
+    }.panic);
+};
+
+pub const std_options: std.Options = .{
+    .logFn = kernel.std_options.logFn,
+    .log_level = .debug,
+};
 
 pub fn main() void {
     kernel.sbi.debug_console.writeByte('\n') catch {};
@@ -23,8 +36,7 @@ pub fn main() void {
 
     if (has_err) {
         kernel.sbi.debug_console.writeByte('\n') catch {};
-        VirtTest.mem.* = .{ .status = .fail, .code = 1 };
-        while (true) asm volatile ("wfi");
+        VirtTest.write(.{ .status = .fail, .code = 1 });
     }
 }
 
@@ -41,5 +53,13 @@ const VirtTest = packed struct(u64) {
     code: u16,
     _: u32 = 0,
 
-    const mem: *volatile VirtTest = @ptrFromInt(0x100000);
+    fn write(self: VirtTest) noreturn {
+        asm volatile (
+            \\ sfence.vma
+            \\ csrw satp, 0
+            \\ sfence.vma
+        );
+        @as(*VirtTest, @ptrFromInt(0x100000)).* = self;
+        while (true) asm volatile ("wfi");
+    }
 };
