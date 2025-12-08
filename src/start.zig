@@ -18,6 +18,5 @@ export fn kernelMain() callconv(.c) noreturn {
     @memset(bss[0 .. bss_end - bss], 0);
     exception.initHandler();
     @call(.always_inline, root.main, .{});
-    sbi.system.reset(.shutdown, .no_reason) catch {};
     while (true) asm volatile ("wfi");
 }
