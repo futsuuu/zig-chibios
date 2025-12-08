@@ -55,12 +55,19 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run tests");
     for ([_]struct {
+        name: []const u8,
         optimize: std.builtin.OptimizeMode,
     }{
         .{
+            .name = "test-debug",
             .optimize = .Debug,
         },
         .{
+            .name = "test-release",
+            .optimize = .ReleaseSafe,
+        },
+        .{
+            .name = "test-unsafe",
             .optimize = .ReleaseSmall,
         },
     }) |opts| {
@@ -73,6 +80,7 @@ pub fn build(b: *std.Build) void {
             .stack_protector = false,
         });
         const kernel_tests = b.addTest(.{
+            .name = opts.name,
             .root_module = kernel_tests_mod,
             .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
         });
