@@ -102,6 +102,12 @@ pub fn build(b: *std.Build) void {
             "unimp,guest_errors,int,cpu_reset",
             "-D",
             "qemu.log",
+            "-drive",
+            "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
+            "-device",
+            "virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0",
+            "-global",
+            "virtio-mmio.force-legacy=false",
             "-kernel",
             null,
         });
