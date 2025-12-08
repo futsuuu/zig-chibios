@@ -7,6 +7,7 @@ pub const buddy_allocator = @import("buddy_allocator.zig");
 pub const exception = @import("exception.zig");
 pub const sbi = @import("sbi.zig");
 pub const sv32 = @import("sv32.zig");
+pub const virtio = @import("virtio.zig");
 
 comptime {
     _ = @import("start.zig");
