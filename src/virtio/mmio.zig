@@ -14,11 +14,14 @@ pub const Register = union(virtio.DeviceType) {
     pub fn fromAddr(addr: usize) !Register {
         const reg: *RegisterFields(void) = @ptrFromInt(addr);
         if (reg.magic.get() != magic) {
-            log.err("invalid magic value: {x}", .{reg.magic.get()});
+            log.err("invalid magic value 0x{x}", .{reg.magic.get()});
             return error.InvalidDevice;
         }
         if (reg.version.get() != supported_version) {
-            log.err("invalid device version: {x}", .{reg.version.get()});
+            log.err(
+                "invalid device version 0x{x}: currently only supported version 0x{x}",
+                .{ reg.version.get(), supported_version },
+            );
             return error.InvalidDevice;
         }
         return switch (reg.device_id.get()) {
@@ -52,7 +55,7 @@ pub fn RegisterFields(Config: type) type {
         queue_notify: RegisterField(u32, .{ .offset = 0x50, .permission = .w }),
         interrupt_status: RegisterField(u32, .{ .offset = 0x60, .permission = .r }),
         interrupt_ack: RegisterField(u32, .{ .offset = 0x64, .permission = .w }),
-        status: RegisterField(virtio.DeviceStatus, .{ .offset = 0x70, .permission = .rw }),
+        status: RegisterField(virtio.DeviceStatus, .{ .offset = 0x70, .permission = .rw, .bit_size = 32 }),
         queue_desc_low: RegisterField(u32, .{ .offset = 0x80, .permission = .w }),
         queue_desc_high: RegisterField(u32, .{ .offset = 0x84, .permission = .w }),
     };
@@ -63,20 +66,30 @@ pub fn RegisterFields(Config: type) type {
 fn RegisterField(T: type, opts: struct {
     offset: usize,
     permission: enum { r, w, rw },
+    bit_size: ?u16 = null,
 }) type {
+    const bit_size = opts.bit_size orelse @bitSizeOf(T);
+    const Wrapper = packed struct {
+        value: T,
+        padding: std.meta.Int(.unsigned, bit_size - @bitSizeOf(T)) = 0,
+    };
+    if (opts.bit_size) |b| {
+        std.debug.assert(@bitSizeOf(Wrapper) == b);
+    }
+
     return struct {
         _: u0,
 
         pub inline fn get(self: *const @This()) T {
             if (opts.permission == .w) @compileError("cannot read from write-only register");
-            const ptr: *const volatile T = @ptrFromInt(@intFromPtr(self) + opts.offset);
-            return std.mem.littleToNative(T, ptr.*);
+            const ptr: *const volatile Wrapper = @ptrFromInt(@intFromPtr(self) + opts.offset);
+            return std.mem.littleToNative(Wrapper, ptr.*).value;
         }
 
         pub inline fn set(self: *@This(), value: T) void {
             if (opts.permission == .r) @compileError("cannot write to read-only register");
-            const ptr: *volatile T = @ptrFromInt(@intFromPtr(self) + opts.offset);
-            ptr.* = std.mem.nativeToLittle(T, value);
+            const ptr: *volatile Wrapper = @ptrFromInt(@intFromPtr(self) + opts.offset);
+            ptr.* = std.mem.nativeToLittle(Wrapper, .{ .value = value });
         }
 
         pub inline fn setBit(self: *@This(), bitflags: T) void {

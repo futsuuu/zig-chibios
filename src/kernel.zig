@@ -45,6 +45,12 @@ pub const std_options: std.Options = blk: {
 var scheduler: Process.Scheduler = undefined;
 
 pub fn main() void {
+    defer log.info("exit", .{});
+    virtio.init() catch |e| {
+        log.err("failed to initialize virtio: {}", .{e});
+        return;
+    };
+
     sbi.debug_console.writeByte('\n') catch {};
 
     const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
@@ -58,8 +64,6 @@ pub fn main() void {
     _ = scheduler.spawn(&procAEntry) catch unreachable;
     _ = scheduler.spawn(&procBEntry) catch unreachable;
     scheduler.yield();
-
-    log.info("exit", .{});
 }
 
 fn delay() void {

@@ -24,7 +24,7 @@ pub fn init() !void {
             }
             while (features.next()) switch (features.current()) {
                 .reserved => |f| switch (f) {
-                    .version_1, .ring_packed => try features.accept(),
+                    .version_1 => try features.accept(),
                     else => features.inherit(),
                 },
                 .block => features.inherit(),
@@ -107,13 +107,24 @@ pub fn FeatureStream(UnionOfFeatures: type) type {
     }
     const max_select = max_feature_index / 32 + 1;
 
+    const feat = struct {
+        fn name(feature: UnionOfFeatures) []const u8 {
+            return switch (feature) {
+                inline else => |f| @tagName(f),
+            };
+        }
+        fn index(feature: UnionOfFeatures) u32 {
+            return switch (feature) {
+                inline else => |f| @intFromEnum(f),
+            };
+        }
+    };
+
     const Device = struct {
         bits: [max_select]u32,
 
         fn isOffered(self: *const @This(), feature: UnionOfFeatures) bool {
-            const feature_index = switch (feature) {
-                inline else => |e| @intFromEnum(e),
-            };
+            const feature_index = feat.index(feature);
             const select = feature_index >> 5; // i / 32
             const bitidx: u5 = @truncate(feature_index); // i % 32
             return (self.bits[select] >> bitidx) & 1 == 1;
@@ -124,9 +135,7 @@ pub fn FeatureStream(UnionOfFeatures: type) type {
         bits: [max_select]u32,
 
         fn accept(self: *@This(), feature: UnionOfFeatures) void {
-            const feature_index = switch (feature) {
-                inline else => |e| @intFromEnum(e),
-            };
+            const feature_index = feat.index(feature);
             const select = feature_index >> 5;
             const bitidx: u5 = @truncate(feature_index);
             self.bits[select] |= @as(u32, 1) << bitidx;
@@ -147,12 +156,12 @@ pub fn FeatureStream(UnionOfFeatures: type) type {
         };
 
         fn next(self: *Stream) bool {
-            if (self.consumed < all_features.len) {
-                self.consumed += 1;
-                return true;
-            } else {
-                return false;
+            if (all_features.len <= self.consumed) return false;
+            self.consumed += 1;
+            if (std.log.logEnabled(.debug, .virtio)) {
+                log.debug("device: {s} = {}", .{ feat.name(self.current()), self.isOffered() });
             }
+            return true;
         }
 
         fn current(self: *const Stream) UnionOfFeatures {
@@ -164,8 +173,13 @@ pub fn FeatureStream(UnionOfFeatures: type) type {
         }
 
         fn accept(self: *Stream) error{FeatureNotOffered}!void {
-            if (!self.isOffered()) return error.FeatureNotOffered;
-            self.driver.accept(self.current());
+            const feature = self.current();
+            if (self.device.isOffered(feature)) {
+                self.driver.accept(feature);
+            } else {
+                log.err("cannot accept feature that is not offered by device: {s}", .{feat.name(feature)});
+                return error.FeatureNotOffered;
+            }
         }
 
         fn inherit(self: *Stream) void {
