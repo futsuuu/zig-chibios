@@ -43,6 +43,8 @@ pub fn main() void {
     if (has_err) {
         kernel.sbi.debug_console.writeByte('\n') catch {};
         VirtTest.write(.{ .status = .fail, .code = 1 });
+    } else {
+        VirtTest.write(.{ .status = .pass, .code = 0 });
     }
 }
 

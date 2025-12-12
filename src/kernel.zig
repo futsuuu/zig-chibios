@@ -78,6 +78,12 @@ pub fn printPanicInfo(msg: []const u8, first_trace_addr: ?usize) void {
 var scheduler: Process.Scheduler = undefined;
 
 pub fn main() void {
+    defer log.info("exit", .{});
+    virtio.init() catch |e| {
+        log.err("failed to initialize virtio: {}", .{e});
+        return;
+    };
+
     sbi.debug_console.writeByte('\n') catch {};
 
     os.heap.initPageAllocator() catch @panic("OOM");
@@ -87,8 +93,6 @@ pub fn main() void {
     _ = scheduler.spawn(&procAEntry) catch unreachable;
     _ = scheduler.spawn(&procBEntry) catch unreachable;
     scheduler.yield();
-
-    log.info("exit", .{});
 }
 
 fn delay() void {
