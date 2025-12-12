@@ -18,3 +18,16 @@ pub const Features = enum(u32) {
     secure_erase = 16,
     zoned = 17,
 };
+
+pub const Request = packed struct {
+    pub const Type = enum(u32) {
+        in = 0,
+        out = 1,
+        flush = 4,
+        get_id = 5,
+        get_lifetime = 6,
+        discard = 11,
+        write_zeroes = 13,
+        secure_erase = 14,
+    };
+};

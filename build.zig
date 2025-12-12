@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) void {
         "-drive",
         "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
         "-device",
-        "virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0",
+        "virtio-blk-device,bus=virtio-mmio-bus.0,drive=drive0,packed=true",
         "-kernel",
         b.getInstallPath(.bin, kernel.name),
     });
@@ -113,7 +113,7 @@ pub fn build(b: *std.Build) void {
             "-drive",
             "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
             "-device",
-            "virtio-blk-device,drive=drive0,bus=virtio-mmio-bus.0",
+            "virtio-blk-device,bus=virtio-mmio-bus.0,drive=drive0,packed=true",
             "-kernel",
             null,
         });
