@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.virtio);
 
+pub const Queue = @import("virtio/Queue.zig");
 pub const block = @import("virtio/block.zig");
 pub const mmio = @import("virtio/mmio.zig");
 
@@ -24,16 +25,22 @@ pub fn init() !void {
             }
             while (features.next()) switch (features.current()) {
                 .reserved => |f| switch (f) {
-                    .version_1 => try features.accept(),
+                    .version_1,
+                    // TODO: remove following requrements
+                    .ring_packed,
+                    => try features.accept(),
                     else => features.inherit(),
                 },
-                .block => features.inherit(),
+                .block => |f| switch (f) {
+                    .multiqueue => {},
+                    else => features.inherit(),
+                },
             };
             for (0..features.driver.bits.len) |i| {
                 register.driver_features_sel.set(@truncate(i));
                 register.driver_features.set(features.driver.bits[i]);
             }
-            // TODO: check device-specific configuration fields (Read-Only) before accepting it
+            // TODO: check device-specific configuration fields (Read-Only) before accepting it if needed
             register.status.setBit(.{ .features_ok = true });
             if (!register.status.get().features_ok) {
                 log.err("device is unusable: FEATURES_OK status bit was removed by the device", .{});
@@ -42,6 +49,18 @@ pub fn init() !void {
 
             // Perform device-specific setup, including discovery of virtqueues for the device, optional per-bus setup,
             // reading and possibly writing the device’s virtio configuration space, and population of virtqueues.
+            register.queue_sel.set(0);
+            if (register.queue_ready.get() != 0) {
+                log.err("virtqueue is already in use", .{});
+                return error.QueueNotAvailable;
+            }
+            const queue_size_max = register.queue_size_max.get();
+            if (queue_size_max == 0) {
+                log.err("QueueSizeMax is zero", .{});
+                return error.QueueNotAvailable;
+            }
+            // Allocate and zero the queue memory, making sure the memory is physically contiguous.
+            register.queue_ready.set(1);
 
             register.status.setBit(.{ .driver_ok = true });
         },
