@@ -4,7 +4,7 @@ const log = std.log.scoped(.virtio_mmio);
 const qemu = @import("../qemu.zig");
 const virtio = @import("../virtio.zig");
 
-const magic: u32 = ('v' << 0) + ('i' << 8) + ('r' << 16) + ('t' << 24);
+const magic: u32 = @bitCast(std.mem.nativeToLittle([4]u8, "virt".*));
 const supported_version: u32 = 2;
 
 pub const Register = union(virtio.DeviceType) {
@@ -52,16 +52,30 @@ pub fn RegisterFields(Config: type) type {
         queue_size_max: RegisterField(u32, .{ .offset = 0x34, .permission = .r }),
         queue_size: RegisterField(u32, .{ .offset = 0x38, .permission = .w }),
         queue_ready: RegisterField(u32, .{ .offset = 0x44, .permission = .rw }),
-        queue_notify: RegisterField(u32, .{ .offset = 0x50, .permission = .w }),
+        queue_notify: RegisterField(QueueNotifier, .{ .offset = 0x50, .permission = .w }),
         interrupt_status: RegisterField(u32, .{ .offset = 0x60, .permission = .r }),
         interrupt_ack: RegisterField(u32, .{ .offset = 0x64, .permission = .w }),
         status: RegisterField(virtio.DeviceStatus, .{ .offset = 0x70, .permission = .rw, .bit_size = 32 }),
         queue_desc_low: RegisterField(u32, .{ .offset = 0x80, .permission = .w }),
         queue_desc_high: RegisterField(u32, .{ .offset = 0x84, .permission = .w }),
+        queue_driver_low: RegisterField(u32, .{ .offset = 0x90, .permission = .w }),
+        queue_driver_high: RegisterField(u32, .{ .offset = 0x94, .permission = .w }),
+        queue_device_low: RegisterField(u32, .{ .offset = 0xa0, .permission = .w }),
+        queue_device_high: RegisterField(u32, .{ .offset = 0xa4, .permission = .w }),
     };
     std.debug.assert(@sizeOf(T) == 0);
     return T;
 }
+
+pub const QueueNotifier = packed union {
+    index: u32,
+    /// Used when VIRTIO_F_NOTIFICATION_DATA has been negotiated.
+    data: packed struct(u32) {
+        vq_index: u16,
+        next_offset: u15,
+        next_wrap: bool,
+    },
+};
 
 fn RegisterField(T: type, opts: struct {
     offset: usize,

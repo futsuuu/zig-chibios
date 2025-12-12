@@ -9,12 +9,12 @@ pub fn Little(T: type) type {
 
 fn Converter(T: type, endian: std.builtin.Endian) type {
     return packed struct {
-        _inner: T,
+        _: T,
         pub inline fn fromNative(x: T) @This() {
-            return .{ ._inner = std.mem.nativeTo(T, x, endian) };
+            return .{ ._ = std.mem.nativeTo(T, x, endian) };
         }
         pub inline fn toNative(self: @This()) T {
-            return std.mem.toNative(T, self._inner, endian);
+            return std.mem.toNative(T, self._, endian);
         }
     };
 }
