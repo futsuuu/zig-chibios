@@ -3,6 +3,7 @@ const std = @import("std");
 const log = std.log.scoped(.kernel);
 
 pub const Process = @import("Process.zig");
+pub const buddy_allocator = @import("buddy_allocator.zig");
 pub const exception = @import("exception.zig");
 pub const sbi = @import("sbi.zig");
 pub const sv32 = @import("sv32.zig");
@@ -35,6 +36,27 @@ pub const std_options: std.Options = blk: {
     };
     break :blk .{
         .logFn = funcs.logFn,
+        .page_size_min = 4 << 10,
+        .page_size_max = 4 << 10,
+    };
+};
+
+pub const os = struct {
+    pub const heap = struct {
+        const PageAllocator = buddy_allocator.BuddyAllocator(.{});
+
+        pub fn initPageAllocator() std.mem.Allocator.Error!void {
+            const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
+            const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
+            const buf = free_ram[0 .. free_ram_end - free_ram];
+            instance = try .init(buf);
+        }
+
+        var instance: PageAllocator = undefined;
+        pub const page_allocator: std.mem.Allocator = .{
+            .ptr = &instance,
+            .vtable = &PageAllocator.vtable,
+        };
     };
 };
 
@@ -57,14 +79,10 @@ var scheduler: Process.Scheduler = undefined;
 pub fn main() void {
     sbi.debug_console.writeByte('\n') catch {};
 
-    const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
-    const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
-    const buf = free_ram[0 .. free_ram_end - free_ram];
-    var fba: std.heap.FixedBufferAllocator = .init(buf);
-    const pt_allocator = fba.allocator();
+    os.heap.initPageAllocator() catch @panic("OOM");
 
     var proc_buf: [8]Process = undefined;
-    scheduler = .init(&proc_buf, pt_allocator);
+    scheduler = .init(&proc_buf, std.heap.page_allocator);
     _ = scheduler.spawn(&procAEntry) catch unreachable;
     _ = scheduler.spawn(&procBEntry) catch unreachable;
     scheduler.yield();

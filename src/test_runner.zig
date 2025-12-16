@@ -15,10 +15,19 @@ pub const panic = std.debug.FullPanic(struct {
 pub const std_options: std.Options = .{
     .logFn = kernel.std_options.logFn,
     .log_level = .debug,
+    .page_size_min = 4 << 10,
+    .page_size_max = 4 << 10,
+};
+
+pub const os = struct {
+    pub const heap = struct {
+        pub const page_allocator = kernel.os.heap.page_allocator;
+    };
 };
 
 pub fn main() void {
     kernel.sbi.debug_console.writeByte('\n') catch {};
+    kernel.os.heap.initPageAllocator() catch @panic("OOM");
 
     var has_err = false;
     for (@as([]const std.builtin.TestFn, builtin.test_functions)) |t| {
