@@ -4,16 +4,13 @@ const log = std.log.scoped(.test_runner);
 
 const kernel = @import("kernel");
 
-pub const panic = blk: {
-    break :blk std.debug.FullPanic(struct {
-        fn panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
-            @branchHint(.cold);
-            _ = first_trace_addr;
-            log.err("PANIC: {s}", .{msg});
-            VirtTest.write(.{ .status = .fail, .code = 1 });
-        }
-    }.panic);
-};
+pub const panic = std.debug.FullPanic(struct {
+    fn panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
+        @branchHint(.cold);
+        kernel.printPanicInfo(msg, first_trace_addr);
+        VirtTest.write(.{ .status = .fail, .code = 1 });
+    }
+}.panic);
 
 pub const std_options: std.Options = .{
     .logFn = kernel.std_options.logFn,

@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.kernel);
 
@@ -10,17 +11,13 @@ comptime {
     _ = @import("start.zig");
 }
 
-pub const panic = blk: {
-    break :blk std.debug.FullPanic(struct {
-        fn panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
-            @branchHint(.cold);
-            _ = first_trace_addr;
-            log.err("PANIC: {s}", .{msg});
-            // _ = sbi.system.reset(.shutdown, .system_failure);
-            while (true) asm volatile ("wfi");
-        }
-    }.panic);
-};
+pub const panic = std.debug.FullPanic(struct {
+    fn panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
+        @branchHint(.cold);
+        printPanicInfo(msg, first_trace_addr);
+        while (true) asm volatile ("wfi");
+    }
+}.panic);
 
 pub const std_options: std.Options = blk: {
     const funcs = struct {
@@ -40,6 +37,20 @@ pub const std_options: std.Options = blk: {
         .logFn = funcs.logFn,
     };
 };
+
+pub fn printPanicInfo(msg: []const u8, first_trace_addr: ?usize) void {
+    @branchHint(.cold);
+    log.err("PANIC: {s}", .{msg});
+    var iter: std.debug.StackIterator = .init(first_trace_addr, null);
+    var index: usize = 0;
+    while (iter.next()) |addr| : (index += 1) {
+        switch (builtin.target.ptrBitWidth()) {
+            32 => log.err("{:0>3}: 0x{x:0>8}", .{ index, addr }),
+            64 => log.err("{:0>3}: 0x{x:0>16}", .{ index, addr }),
+            else => unreachable,
+        }
+    }
+}
 
 var scheduler: Process.Scheduler = undefined;
 
