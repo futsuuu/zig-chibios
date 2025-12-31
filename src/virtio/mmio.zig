@@ -4,42 +4,42 @@ const log = std.log.scoped(.virtio_mmio);
 const qemu = @import("../qemu.zig");
 const virtio = @import("../virtio.zig");
 
-const magic: u32 = @bitCast(std.mem.nativeToLittle([4]u8, "virt".*));
-const supported_version: u32 = 2;
+pub const RegisterHeader = struct {
+    pub const expected_magic: u32 = @bitCast(std.mem.nativeToLittle([4]u8, "virt".*));
+    pub const expected_version: u32 = 2;
 
-pub const Register = union(virtio.DeviceType) {
-    reserved: void,
-    block: *RegisterFields(virtio.block.Config),
+    magic: RegisterField(u32, .{ .offset = 0x00, .permission = .r }),
+    version: RegisterField(u32, .{ .offset = 0x04, .permission = .r }),
+    device_id: RegisterField(virtio.DeviceType, .{ .offset = 0x08, .permission = .r }),
 
-    pub fn fromAddr(addr: usize) !Register {
-        const reg: *RegisterFields(void) = @ptrFromInt(addr);
-        if (reg.magic.get() != magic) {
-            log.err("invalid magic value 0x{x}", .{reg.magic.get()});
+    pub fn init(addr: usize) error{InvalidDevice}!*const RegisterHeader {
+        const self: *const RegisterHeader = @ptrFromInt(addr);
+        if (self.magic.read() != expected_magic) {
+            log.err("invalid magic value 0x{x}", .{self.magic.read()});
             return error.InvalidDevice;
         }
-        if (reg.version.get() != supported_version) {
+        if (self.version.read() != expected_version) {
             log.err(
                 "invalid device version 0x{x}: currently only supported version 0x{x}",
-                .{ reg.version.get(), supported_version },
+                .{ self.version.read(), expected_version },
             );
             return error.InvalidDevice;
         }
-        return switch (reg.device_id.get()) {
-            .reserved => .reserved,
-            inline else => |t| @unionInit(Register, @tagName(t), @ptrCast(reg)),
-        };
+        return self;
     }
-    test fromAddr {
-        switch (try fromAddr(qemu.virt_test.base)) {
-            .block => |reg| try std.testing.expect(reg.magic.get() == magic),
-            else => unreachable,
-        }
+    test init {
+        const header = try init(qemu.virt_test.base);
+        try std.testing.expect(header.device_id.read() == .block);
     }
 };
 
-pub fn RegisterFields(Config: type) type {
-    _ = Config;
-    const T = struct {
+pub fn Register(Config: type) type {
+    return struct {
+        const Self = @This();
+        comptime {
+            std.debug.assert(@sizeOf(Self) == 0);
+        }
+
         magic: RegisterField(u32, .{ .offset = 0x00, .permission = .r }),
         version: RegisterField(u32, .{ .offset = 0x04, .permission = .r }),
         device_id: RegisterField(virtio.DeviceType, .{ .offset = 0x08, .permission = .r }),
@@ -62,9 +62,15 @@ pub fn RegisterFields(Config: type) type {
         queue_driver_high: RegisterField(u32, .{ .offset = 0x94, .permission = .w }),
         queue_device_low: RegisterField(u32, .{ .offset = 0xa0, .permission = .w }),
         queue_device_high: RegisterField(u32, .{ .offset = 0xa4, .permission = .w }),
+        config: RegisterField(Config, .{ .offset = 0x100, .permission = .rw, .endian = .native }),
+
+        pub fn init(header: *const RegisterHeader) *Self {
+            if (header.device_id.read() == .reserved) {
+                std.debug.panic("device with DeviceID 0x0 should be ignored", .{});
+            }
+            return @ptrCast(@constCast(header));
+        }
     };
-    std.debug.assert(@sizeOf(T) == 0);
-    return T;
 }
 
 pub const QueueNotifier = packed union {
@@ -81,6 +87,7 @@ fn RegisterField(T: type, opts: struct {
     offset: usize,
     permission: enum { r, w, rw },
     bit_size: ?u16 = null,
+    endian: enum { native, little } = .little,
 }) type {
     const bit_size = opts.bit_size orelse @bitSizeOf(T);
     const Wrapper = packed struct {
@@ -94,23 +101,29 @@ fn RegisterField(T: type, opts: struct {
     return struct {
         _: u0,
 
-        pub inline fn get(self: *const @This()) T {
+        pub inline fn read(self: *const @This()) T {
             if (opts.permission == .w) @compileError("cannot read from write-only register");
             const ptr: *const volatile Wrapper = @ptrFromInt(@intFromPtr(self) + opts.offset);
-            return std.mem.littleToNative(Wrapper, ptr.*).value;
+            return switch (opts.endian) {
+                .native => ptr.value,
+                .little => std.mem.littleToNative(Wrapper, ptr.*).value,
+            };
         }
 
-        pub inline fn set(self: *@This(), value: T) void {
+        pub inline fn write(self: *@This(), value: T) void {
             if (opts.permission == .r) @compileError("cannot write to read-only register");
             const ptr: *volatile Wrapper = @ptrFromInt(@intFromPtr(self) + opts.offset);
-            ptr.* = std.mem.nativeToLittle(Wrapper, .{ .value = value });
+            ptr.* = switch (opts.endian) {
+                .native => .{ .value = value },
+                .little => std.mem.nativeToLittle(Wrapper, .{ .value = value }),
+            };
         }
 
-        pub inline fn setBit(self: *@This(), bitflags: T) void {
+        pub inline fn writeBit(self: *@This(), bitflags: T) void {
             const Int = std.meta.Int(.unsigned, @bitSizeOf(T));
-            const lhs: Int = @bitCast(self.get());
+            const lhs: Int = @bitCast(self.read());
             const rhs: Int = @bitCast(bitflags);
-            self.set(@bitCast(lhs | rhs));
+            self.write(@bitCast(lhs | rhs));
         }
     };
 }

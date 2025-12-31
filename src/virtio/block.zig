@@ -1,8 +1,8 @@
 const endian = @import("../endian.zig");
 const Le = endian.Little;
 
-pub const Config = extern struct {
-    capacity: u64,
+pub const Config = packed struct {
+    capacity: Le(u64),
 };
 
 pub const Features = enum(u32) {
