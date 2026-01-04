@@ -133,7 +133,7 @@ fn splitAddr(addr: usize) struct { u32, u32 } {
     };
 }
 
-pub const DeviceStatus = packed struct(u8) {
+pub const DeviceStatus = packed struct(u32) {
     // 1
     acknowledge: bool = false,
     // 2
@@ -142,11 +142,12 @@ pub const DeviceStatus = packed struct(u8) {
     driver_ok: bool = false,
     // 8
     features_ok: bool = false,
-    _: u2 = 0,
+    _0: u2 = 0,
     // 64
     needs_reset: bool = false,
     // 128
     failed: bool = false,
+    _1: u24 = 0,
 
     pub const reset: DeviceStatus = .{};
 };
