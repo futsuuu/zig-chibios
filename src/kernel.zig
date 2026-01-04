@@ -79,14 +79,23 @@ var scheduler: Process.Scheduler = undefined;
 
 pub fn main() void {
     defer log.info("exit", .{});
-    virtio.init() catch |e| {
+
+    os.heap.initPageAllocator() catch @panic("OOM");
+
+    var virtq, const register = virtio.init(std.heap.page_allocator) catch |e| {
         log.err("failed to initialize virtio: {}", .{e});
+        return;
+    } orelse {
+        log.err("virtio device not found", .{});
         return;
     };
 
     sbi.debug_console.writeByte('\n') catch {};
 
-    os.heap.initPageAllocator() catch @panic("OOM");
+    var buf = std.mem.zeroes([512]u8);
+    virtio.request(&virtq, register, .read, &buf, 0) catch @panic("read error");
+    @memcpy(buf[0..].ptr, "hello world!");
+    virtio.request(&virtq, register, .write, &buf, 0) catch @panic("write error");
 
     var proc_buf: [8]Process = undefined;
     scheduler = .init(&proc_buf, std.heap.page_allocator);

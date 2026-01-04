@@ -27,6 +27,13 @@ pub const RequestHeader = packed struct {
     _: u32 = 0,
     sector: Le(u64),
 
+    pub fn init(t: Type, sector: u64) RequestHeader {
+        return .{
+            .type = .fromNative(t),
+            .sector = .fromNative(sector),
+        };
+    }
+
     pub const Type = enum(u32) {
         in = 0,
         out = 1,
@@ -59,4 +66,25 @@ pub const RequestStatus = enum(u8) {
     zone_unaligned_wp = 4,
     zone_open_resource = 5,
     zone_active_resource = 6,
+
+    pub const Error = error{
+        Io,
+        Unsupported,
+        ZoneInvalidCmd,
+        ZoneUnalignedWp,
+        ZoneOpenResource,
+        ZoneActiveResource,
+    };
+
+    pub fn ensureOk(self: RequestStatus) Error!void {
+        return switch (self) {
+            .ok => {},
+            .io_error => Error.Io,
+            .unsupported => Error.Unsupported,
+            .zone_invalid_cmd => Error.ZoneInvalidCmd,
+            .zone_unaligned_wp => Error.ZoneUnalignedWp,
+            .zone_open_resource => Error.ZoneOpenResource,
+            .zone_active_resource => Error.ZoneActiveResource,
+        };
+    }
 };

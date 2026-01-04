@@ -9,12 +9,24 @@ pub fn Little(T: type) type {
 
 fn Converter(T: type, endian: std.builtin.Endian) type {
     return packed struct {
-        _: T,
+        int: Int,
+
+        const Int = std.meta.Int(.unsigned, @bitSizeOf(T));
+
         pub inline fn fromNative(x: T) @This() {
-            return .{ ._ = std.mem.nativeTo(T, x, endian) };
+            const native: Int = switch (@typeInfo(T)) {
+                .@"enum" => @intFromEnum(x),
+                else => @bitCast(x),
+            };
+            return .{ .int = std.mem.nativeTo(Int, native, endian) };
         }
+
         pub inline fn toNative(self: @This()) T {
-            return std.mem.toNative(T, self._, endian);
+            const native = std.mem.toNative(Int, self.int, endian);
+            return switch (@typeInfo(T)) {
+                .@"enum" => @enumFromInt(native),
+                else => @bitCast(native),
+            };
         }
     };
 }

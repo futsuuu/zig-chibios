@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const log = std.log.scoped(.virtio_mmio);
 
 const qemu = @import("../qemu.zig");
@@ -37,7 +38,7 @@ pub fn Register(Config: type) type {
     return struct {
         const Self = @This();
         comptime {
-            std.debug.assert(@sizeOf(Self) == 0);
+            assert(@sizeOf(Self) == 0);
         }
 
         magic: RegisterField(u32, .{ .offset = 0x00, .permission = .r }),
@@ -95,14 +96,20 @@ fn RegisterField(T: type, opts: struct {
         padding: std.meta.Int(.unsigned, bit_size - @bitSizeOf(T)) = 0,
     };
     if (opts.bit_size) |b| {
-        std.debug.assert(@bitSizeOf(Wrapper) == b);
+        assert(@bitSizeOf(Wrapper) == b);
     }
 
     return struct {
         _: u0,
 
+        pub inline fn raw(self: *@This()) *T {
+            comptime assert(opts.permission == .rw);
+            comptime assert(opts.endian == .native);
+            return @ptrFromInt(@intFromPtr(self) + opts.offset);
+        }
+
         pub inline fn read(self: *const @This()) T {
-            if (opts.permission == .w) @compileError("cannot read from write-only register");
+            comptime assert(opts.permission != .w);
             const ptr: *const volatile Wrapper = @ptrFromInt(@intFromPtr(self) + opts.offset);
             return switch (opts.endian) {
                 .native => ptr.value,
@@ -111,7 +118,7 @@ fn RegisterField(T: type, opts: struct {
         }
 
         pub inline fn write(self: *@This(), value: T) void {
-            if (opts.permission == .r) @compileError("cannot write to read-only register");
+            comptime assert(opts.permission != .r);
             const ptr: *volatile Wrapper = @ptrFromInt(@intFromPtr(self) + opts.offset);
             ptr.* = switch (opts.endian) {
                 .native => .{ .value = value },

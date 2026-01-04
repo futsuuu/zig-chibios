@@ -5,15 +5,72 @@ const Le = endian.Little;
 
 const Queue = @This();
 
-desc_ring: []align(16) Descriptor,
+desc_ring: []align(16) volatile Descriptor,
+index_counter: usize = 0,
+wrap_counter: bool = true,
 /// Read-only
-device: *align(4) const EventSuppression,
+device_event: *align(4) const volatile EventSuppression,
 /// Write-only
-driver: *align(4) EventSuppression,
+driver_event: *align(4) volatile EventSuppression,
 
-pub fn init(a: std.mem.Allocator) Queue {
-    _ = a;
-    unreachable;
+pub fn init(a: std.mem.Allocator, size: usize) std.mem.Allocator.Error!Queue {
+    const desc = try a.alignedAlloc(Descriptor, .@"16", size);
+    @memset(desc, .init);
+    const supp = try a.alignedAlloc(EventSuppression, .@"4", 2);
+    @memset(supp, .init);
+    return .{
+        .desc_ring = desc,
+        .device_event = &supp[0],
+        .driver_event = &supp[1],
+    };
+}
+
+pub fn getAddr(self: Queue, area: enum { desc, device, driver }) usize {
+    switch (area) {
+        .desc => return @intFromPtr(self.desc_ring.ptr),
+        .device => return @intFromPtr(self.device_event),
+        .driver => return @intFromPtr(self.driver_event),
+    }
+}
+
+pub fn append(self: *Queue, bytes: []const u8, flags: Descriptor.Flags) *volatile Descriptor {
+    const desc = self.addDescriptor();
+    desc.addr = .fromNative(@intCast(@intFromPtr(bytes.ptr)));
+    desc.len = .fromNative(@intCast(bytes.len));
+    desc.flags = .fromNative(flags);
+    return desc;
+}
+
+pub fn appendWritable(self: *Queue, bytes: []volatile u8, flags: Descriptor.Flags) *volatile Descriptor {
+    const desc = self.addDescriptor();
+    desc.addr = .fromNative(@intCast(@intFromPtr(bytes.ptr)));
+    desc.len = .fromNative(@intCast(bytes.len));
+    desc.flags = .fromNative(flags.merge(.{ .write = true }));
+    return desc;
+}
+
+fn addDescriptor(self: *Queue) *volatile Descriptor {
+    const desc = &self.desc_ring[self.index_counter];
+    self.index_counter += 1;
+    if (self.index_counter == self.desc_ring.len) {
+        std.debug.panic("handling of descriptor ring overflow is not yet implemented", .{});
+        // self.index_counter = 0;
+        // self.wrap_counter = !self.wrap_counter;
+    }
+    return desc;
+}
+
+pub fn markAsAvailable(self: Queue, desc: *volatile Descriptor) void {
+    desc.flags = .fromNative(desc.flags.toNative().merge(.{
+        .available = self.wrap_counter,
+        .used = !self.wrap_counter,
+    }));
+}
+
+pub fn isUsed(self: Queue, desc: *const volatile Descriptor) bool {
+    _ = self;
+    const flags = desc.flags.toNative();
+    return flags.used == flags.available;
 }
 
 pub const Descriptor = packed struct(u128) {
@@ -21,6 +78,8 @@ pub const Descriptor = packed struct(u128) {
     len: Le(u32),
     id: Le(u16),
     flags: Le(Flags),
+
+    const init = std.mem.zeroes(Descriptor);
 
     pub const Flags = packed struct(u16) {
         // 1 << 0
@@ -52,10 +111,28 @@ pub const EventSuppression = packed struct(u32) {
         _: u14 = 0,
     }),
 
-    const Flags = enum(u2) {
+    const init = std.mem.zeroes(EventSuppression);
+
+    pub fn getEnabled(self: EventSuppression) ?union(enum) {
+        all,
+        only: struct { index: usize, wrap_counter: bool },
+    } {
+        return switch (self.flags.toNative().flags) {
+            .enable => .all,
+            .disable => null,
+            .descriptor => .{ .only = b: {
+                const desc = self.desc.toNative();
+                break :b .{
+                    .index = @intCast(desc.offset),
+                    .wrap_counter = desc.wrap,
+                };
+            } },
+        };
+    }
+
+    pub const Flags = enum(u2) {
         enable = 0,
         disable = 1,
         descriptor = 2,
-        _, // 3 is reserved
     };
 };
