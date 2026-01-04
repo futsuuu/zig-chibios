@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.virtio_mmio);
@@ -52,19 +53,10 @@ pub fn Register(Config: type) type {
         driver_features: RegisterField(0x20, .w, u32),
         driver_features_sel: RegisterField(0x24, .w, u32),
         queue_sel: RegisterField(0x30, .w, u32),
-        queue_size_max: RegisterField(0x34, .r, u32),
-        queue_size: RegisterField(0x38, .w, u32),
-        queue_ready: RegisterField(0x44, .rw, u32),
         queue_notify: RegisterField(0x50, .w, QueueNotifier),
         interrupt_status: RegisterField(0x60, .r, u32),
         interrupt_ack: RegisterField(0x64, .w, u32),
         status: RegisterField(0x70, .rw, virtio.DeviceStatus),
-        queue_desc_low: RegisterField(0x80, .w, u32),
-        queue_desc_high: RegisterField(0x84, .w, u32),
-        queue_driver_low: RegisterField(0x90, .w, u32),
-        queue_driver_high: RegisterField(0x94, .w, u32),
-        queue_device_low: RegisterField(0xa0, .w, u32),
-        queue_device_high: RegisterField(0xa4, .w, u32),
 
         pub fn init(header: *const RegisterHeader) *Self {
             if (header.device_id.read() == .reserved) {
@@ -76,11 +68,67 @@ pub fn Register(Config: type) type {
         pub fn config(self: *Self) *Config {
             return @ptrFromInt(@intFromPtr(self) + 0x100);
         }
+
+        pub fn selectQueue(self: *Self, index: u16) error{QueueNotAvailable}!*SelectedQueueRegister {
+            self.queue_sel.write(@intCast(index));
+            const selected: *SelectedQueueRegister = @ptrCast(self);
+            if (selected.ready.read() != 0) {
+                log.err("virtqueue is already in use", .{});
+                return error.QueueNotAvailable;
+            }
+            if (selected.size_max.read() == 0) {
+                log.err("QueueSizeMax is zero", .{});
+                return error.QueueNotAvailable;
+            }
+            return selected;
+        }
+    };
+}
+
+pub const SelectedQueueRegister = struct {
+    size_max: RegisterField(0x34, .r, u32),
+    size: RegisterField(0x38, .w, u32),
+    ready: RegisterField(0x44, .rw, u32),
+    desc_low: RegisterField(0x80, .w, u32),
+    desc_high: RegisterField(0x84, .w, u32),
+    driver_low: RegisterField(0x90, .w, u32),
+    driver_high: RegisterField(0x94, .w, u32),
+    device_low: RegisterField(0xa0, .w, u32),
+    device_high: RegisterField(0xa4, .w, u32),
+
+    pub fn setAddr(
+        self: *SelectedQueueRegister,
+        area: enum { desc, driver, device },
+        addr: usize,
+    ) void {
+        const high, const low = splitAddr(addr);
+        switch (area) {
+            .desc => {
+                self.desc_high.write(high);
+                self.desc_low.write(low);
+            },
+            .driver => {
+                self.driver_high.write(high);
+                self.driver_low.write(low);
+            },
+            .device => {
+                self.device_high.write(high);
+                self.device_low.write(low);
+            },
+        }
+    }
+};
+
+fn splitAddr(addr: usize) struct { u32, u32 } {
+    return switch (comptime builtin.target.ptrBitWidth()) {
+        32 => .{ 0, @intCast(addr) },
+        64 => .{ @intCast(addr >> 32), @truncate(addr) },
+        else => unreachable,
     };
 }
 
 pub const QueueNotifier = packed union {
-    index: u32,
+    index: u16,
     /// Used when VIRTIO_F_NOTIFICATION_DATA has been negotiated.
     data: packed struct(u32) {
         vq_index: u16,

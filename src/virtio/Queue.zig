@@ -5,6 +5,7 @@ const Le = endian.Little;
 
 const Queue = @This();
 
+index: u16,
 desc_ring: []align(16) volatile Descriptor,
 index_counter: usize = 0,
 wrap_counter: bool = true,
@@ -13,12 +14,13 @@ device_event: *align(4) const volatile EventSuppression,
 /// Write-only
 driver_event: *align(4) volatile EventSuppression,
 
-pub fn init(a: std.mem.Allocator, size: usize) std.mem.Allocator.Error!Queue {
+pub fn init(a: std.mem.Allocator, index: u16, size: usize) std.mem.Allocator.Error!Queue {
     const desc = try a.alignedAlloc(Descriptor, .@"16", size);
     @memset(desc, .init);
     const supp = try a.alignedAlloc(EventSuppression, .@"4", 2);
     @memset(supp, .init);
     return .{
+        .index = index,
         .desc_ring = desc,
         .device_event = &supp[0],
         .driver_event = &supp[1],

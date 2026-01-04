@@ -1,4 +1,3 @@
-const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.virtio);
 
@@ -36,7 +35,7 @@ pub fn request(
 
     asm volatile ("fence rw, rw" ::: .{ .memory = true });
     if (virtq.device_event.getEnabled()) |_| {
-        register.queue_notify.write(.{ .index = 0 });
+        register.queue_notify.write(.{ .index = virtq.index });
     }
     while (!virtq.isUsed(first_desc)) {
         asm volatile ("nop");
@@ -78,7 +77,6 @@ pub fn init(a: std.mem.Allocator) !?struct { Queue, *mmio.Register(block.Config)
                 },
                 .block => |f| switch (f) {
                     .flush,
-                    .multiqueue,
                     .zoned,
                     => {},
                     else => features.inherit(),
@@ -95,42 +93,22 @@ pub fn init(a: std.mem.Allocator) !?struct { Queue, *mmio.Register(block.Config)
                 return error.UnusableDevice;
             }
 
-            register.queue_sel.write(0);
-            if (register.queue_ready.read() != 0) {
-                log.err("virtqueue is already in use", .{});
-                return error.QueueNotAvailable;
-            }
-            const queue_size_max = register.queue_size_max.read();
-            if (queue_size_max == 0) {
-                log.err("QueueSizeMax is zero", .{});
-                return error.QueueNotAvailable;
-            }
-            const queue = try Queue.init(a, @intCast(queue_size_max));
-            register.queue_size.write(queue_size_max);
-            const desc_high, const desc_low = splitAddr(queue.getAddr(.desc));
-            register.queue_desc_high.write(desc_high);
-            register.queue_desc_low.write(desc_low);
-            const device_high, const device_low = splitAddr(queue.getAddr(.device));
-            register.queue_device_high.write(device_high);
-            register.queue_device_low.write(device_low);
-            const driver_high, const driver_low = splitAddr(queue.getAddr(.driver));
-            register.queue_driver_high.write(driver_high);
-            register.queue_driver_low.write(driver_low);
-            register.queue_ready.write(1);
+            const queue = b: {
+                const queue_register = try register.selectQueue(0);
+                defer queue_register.ready.write(1);
+                const queue = try Queue.init(a, 0, queue_register.size_max.read());
+                queue_register.size.write(@intCast(queue.desc_ring.len));
+                queue_register.setAddr(.desc, queue.getAddr(.desc));
+                queue_register.setAddr(.driver, queue.getAddr(.driver));
+                queue_register.setAddr(.device, queue.getAddr(.device));
+                break :b queue;
+            };
 
             register.status.writeBit(.{ .driver_ok = true });
 
             return .{ queue, register };
         },
     }
-}
-
-fn splitAddr(addr: usize) struct { u32, u32 } {
-    return switch (comptime builtin.target.ptrBitWidth()) {
-        32 => .{ 0, @intCast(addr) },
-        64 => .{ @intCast(addr >> 32), @truncate(addr) },
-        else => unreachable,
-    };
 }
 
 pub const DeviceStatus = packed struct(u32) {
