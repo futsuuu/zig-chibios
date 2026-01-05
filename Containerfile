@@ -26,4 +26,5 @@ RUN curl -LO https://github.com/qemu/qemu/raw/v10.1.2/pc-bios/opensbi-riscv32-ge
 COPY build.zig .
 COPY build.zig.zon .
 COPY src ./src
+COPY disk ./disk
 RUN zig build --release
