@@ -1,4 +1,4 @@
-/* Zig actually ignores ENTRY section in the linker script, but I keep it just in case. */
+/* Zig actually ignores ENTRY command in the linker script, but I keep it just in case. */
 ENTRY(_start)
 
 SECTIONS {
