@@ -36,7 +36,7 @@ pub fn reset(self: *Process, pc: usize, pt_allocator: std.mem.Allocator) void {
 
 fn switchContext(self: *Process, next: *Process) void {
     next.page_table.activate();
-    exception.setWorkingStack(&next.stack);
+    exception.saveCurrentKernelStack(next.stack[next.stack.len..].ptr);
     self.context.switchTo(&next.context);
 }
 

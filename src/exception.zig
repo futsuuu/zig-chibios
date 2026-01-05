@@ -5,18 +5,25 @@ const csr = @import("csr.zig");
 pub fn initHandler() void {
     csr.stvec.write(.{
         .mode = .direct,
-        .ptr = &kernelEntry,
+        .ptr = kernelEntry,
     });
 }
 
-pub fn setWorkingStack(stack: []const u8) void {
-    csr.sscratch.write(@intFromPtr(stack[stack.len..].ptr));
+pub fn saveCurrentKernelStack(stack_top: *const anyopaque) void {
+    csr.sscratch.write(@intFromPtr(stack_top));
 }
 
 fn kernelEntry() align(4) callconv(.naked) noreturn {
     asm volatile (
+    // sp = user_sp;
+    // sscratch = kernel_stack_top;
+        \\
+        // sp = kernel_stack_top;
+        // sscratch = user_sp;
         \\ csrrw sp, sscratch, sp
         \\
+        // frame: TrapFrame = .{ ... };
+        // sp = &frame;
         \\ addi sp, sp, -4 * 31
         \\ sw ra,  4 * 0(sp)
         \\ sw gp,  4 * 1(sp)
@@ -49,12 +56,15 @@ fn kernelEntry() align(4) callconv(.naked) noreturn {
         \\ sw s10, 4 * 28(sp)
         \\ sw s11, 4 * 29(sp)
         \\
+        // frame.sp = user_sp;
         \\ csrr a0, sscratch
         \\ sw a0,  4 * 30(sp)
         \\
+        // sscratch = kernel_stack_top;
         \\ addi a0, sp, 4 * 31
         \\ csrw sscratch, a0
         \\
+        // handleTrap(&frame);
         \\ mv a0, sp
         \\ call handleTrap
         \\
