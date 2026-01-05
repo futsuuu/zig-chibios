@@ -2,16 +2,18 @@ const std = @import("std");
 
 const csr = @import("csr.zig");
 
-const VirtAddr = packed struct(u32) {
+pub const VirtAddr = packed struct(u32) {
     offset: u12,
     vpn0: u10,
     vpn1: u10,
 };
 
-const PhysAddr = packed struct(u34) {
+pub const PhysAddr = packed struct(u34) {
     offset: u12,
     ppn0: u10,
     ppn1: u12,
+
+    pub const page_size = 1 << @bitSizeOf(@FieldType(PhysAddr, "offset"));
 
     fn getPageNumber(self: PhysAddr) u22 {
         return @as(packed struct(u34) { _: u12, ppn: u22 }, @bitCast(self)).ppn;
@@ -21,12 +23,12 @@ const PhysAddr = packed struct(u34) {
 pub const PageTable = struct {
     entries: [entry_count]Entry,
 
-    const entry_count = (1 << 12) / @sizeOf(Entry);
+    const entry_count = PhysAddr.page_size / @sizeOf(Entry);
 
     pub fn init(a: std.mem.Allocator) *PageTable {
         const entries = a.alignedAlloc(
             Entry,
-            .fromByteUnits(@sizeOf(PageTable)),
+            .fromByteUnits(PhysAddr.page_size),
             entry_count,
         ) catch @panic("OOM");
         return @ptrCast(entries.ptr);
