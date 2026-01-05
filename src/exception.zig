@@ -1,27 +1,16 @@
 const std = @import("std");
 
+const csr = @import("csr.zig");
+
 pub fn initHandler() void {
-    writeCsr(.stvec, @intFromPtr(&kernelEntry));
-}
-
-inline fn readCsr(comptime reg: @Type(.enum_literal)) usize {
-    return asm volatile ("csrr %[ret], " ++ @tagName(reg)
-        : [ret] "=r" (-> usize),
-    );
-}
-
-inline fn writeCsr(comptime reg: @Type(.enum_literal), value: usize) void {
-    asm volatile ("csrw " ++ @tagName(reg) ++ ", %[value]"
-        :
-        : [value] "r" (value),
-    );
+    csr.stvec.write(.{
+        .mode = .direct,
+        .ptr = &kernelEntry,
+    });
 }
 
 pub fn setWorkingStack(stack: []const u8) void {
-    asm volatile ("csrw sscratch, %[stack_base]"
-        :
-        : [stack_base] "r" (stack[stack.len..].ptr),
-    );
+    csr.sscratch.write(@intFromPtr(stack[stack.len..].ptr));
 }
 
 fn kernelEntry() align(4) callconv(.naked) noreturn {
@@ -106,10 +95,23 @@ fn kernelEntry() align(4) callconv(.naked) noreturn {
 
 export fn handleTrap(frame: *TrapFrame) void {
     _ = frame;
-    const scause = readCsr(.scause);
-    const stval = readCsr(.stval);
-    const user_pc = readCsr(.sepc);
-    std.debug.panic("unexpected trap: scause={x}, stval={x}, sepc={x}", .{ scause, stval, user_pc });
+    const scause = csr.scause.read();
+    switch (scause) {
+        .interrupt => |interrupt| switch (interrupt) {
+            else => std.debug.panic("unexpected interrupt {f}: stval = 0x{x}, sepc = 0x{x}", .{
+                interrupt,
+                csr.stval.read(),
+                csr.sepc.read(),
+            }),
+        },
+        .exception => |exception| switch (exception) {
+            else => std.debug.panic("unexpected exception {f}: stval = 0x{x}, sepc = 0x{x}", .{
+                exception,
+                csr.stval.read(),
+                csr.sepc.read(),
+            }),
+        },
+    }
 }
 
 const TrapFrame = packed struct {

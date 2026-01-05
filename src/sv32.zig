@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const csr = @import("csr.zig");
+
 const VirtAddr = packed struct(u32) {
     offset: u12,
     vpn0: u10,
@@ -31,12 +33,10 @@ pub const PageTable = struct {
     }
 
     pub fn activate(self: *const PageTable) void {
-        const satp: packed struct(u32) {
-            ppn: u22,
-            asid: u9 = 0,
-            mode: enum(u1) { bare = 0, sv32 = 1 } = .sv32,
-        } = .{
-            .ppn = self.getAddr().getPageNumber(),
+        const satp: csr.satp.Format = .{
+            .mode = .sv32,
+            .phys_page_num = self.getAddr().getPageNumber(),
+            .addr_space_id = 0,
         };
         asm volatile (
             \\ sfence.vma
