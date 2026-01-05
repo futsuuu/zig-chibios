@@ -18,7 +18,7 @@ pub fn request(
 ) block.RequestStatus.Error!void {
     const header: block.RequestHeader = switch (t) {
         .read => .init(.read, sector),
-        .write => .init(.write, sector)
+        .write => .init(.write, sector),
     };
     var status: block.RequestStatus = undefined;
     const header_desc = virtq.append(.readonly, std.mem.asBytes(&header), .{ .next = true });

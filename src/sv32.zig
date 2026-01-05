@@ -1,5 +1,21 @@
 const std = @import("std");
 
+const VirtAddr = packed struct(u32) {
+    offset: u12,
+    vpn0: u10,
+    vpn1: u10,
+};
+
+const PhysAddr = packed struct(u34) {
+    offset: u12,
+    ppn0: u10,
+    ppn1: u12,
+
+    fn getPageNumber(self: PhysAddr) u22 {
+        return @as(packed struct(u34) { _: u12, ppn: u22 }, @bitCast(self)).ppn;
+    }
+};
+
 pub const PageTable = struct {
     entries: [entry_count]Entry,
 
@@ -14,22 +30,29 @@ pub const PageTable = struct {
         return @ptrCast(entries.ptr);
     }
 
-    pub fn getSatpValue(self: *const PageTable) packed struct(u32) {
-        ppn: u22,
-        asid: u9 = 0,
-        mode: u1 = 1,
-    } {
-        return .{
-            .ppn = @truncate(@intFromPtr(self) / @sizeOf(PageTable)),
+    pub fn activate(self: *const PageTable) void {
+        const satp: packed struct(u32) {
+            ppn: u22,
+            asid: u9 = 0,
+            mode: enum(u1) { bare = 0, sv32 = 1 } = .sv32,
+        } = .{
+            .ppn = self.getAddr().getPageNumber(),
         };
+        asm volatile (
+            \\ sfence.vma
+            \\ csrw satp, %[satp]
+            \\ sfence.vma
+            :
+            : [satp] "r" (satp),
+        );
     }
 
-    fn getAddr(self: *PageTable) PhysAddr {
+    fn getAddr(self: *const PageTable) PhysAddr {
         return @bitCast(@as(u34, @intCast(@intFromPtr(self))));
     }
 
     fn fromAddr(paddr: PhysAddr) *PageTable {
-        return @ptrFromInt(@as(usize, @truncate(@as(u34, @bitCast(paddr)))));
+        return @ptrFromInt(@as(usize, @intCast(@as(u34, @bitCast(paddr)))));
     }
 
     pub fn mapPage(
@@ -88,16 +111,4 @@ pub const PageTable = struct {
             };
         }
     };
-};
-
-const VirtAddr = packed struct(u32) {
-    offset: u12,
-    vpn0: u10,
-    vpn1: u10,
-};
-
-const PhysAddr = packed struct(u34) {
-    offset: u12,
-    ppn0: u10,
-    ppn1: u12,
 };

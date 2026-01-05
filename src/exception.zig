@@ -17,6 +17,13 @@ inline fn writeCsr(comptime reg: @Type(.enum_literal), value: usize) void {
     );
 }
 
+pub fn setWorkingStack(stack: []const u8) void {
+    asm volatile ("csrw sscratch, %[stack_base]"
+        :
+        : [stack_base] "r" (stack[stack.len..].ptr),
+    );
+}
+
 fn kernelEntry() align(4) callconv(.naked) noreturn {
     asm volatile (
         \\ csrrw sp, sscratch, sp

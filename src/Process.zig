@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const exception = @import("exception.zig");
 const sv32 = @import("sv32.zig");
 
 const Process = @This();
@@ -34,15 +35,8 @@ pub fn reset(self: *Process, pc: usize, pt_allocator: std.mem.Allocator) void {
 }
 
 fn switchContext(self: *Process, next: *Process) void {
-    asm volatile (
-        \\ sfence.vma
-        \\ csrw satp, %[satp]
-        \\ sfence.vma
-        \\ csrw sscratch, %[sscratch]
-        :
-        : [satp] "r" (next.page_table.getSatpValue()),
-          [sscratch] "r" (@intFromPtr(&next.stack) + @sizeOf(u8) * next.stack.len),
-    );
+    next.page_table.activate();
+    exception.setWorkingStack(&next.stack);
     self.context.switchTo(&next.context);
 }
 
