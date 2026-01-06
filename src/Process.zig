@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const exception = @import("exception.zig");
 const sv32 = @import("sv32.zig");
+const trap = @import("trap.zig");
 
 const Process = @This();
 
@@ -36,7 +36,7 @@ pub fn reset(self: *Process, pc: usize, pt_allocator: std.mem.Allocator) void {
 
 fn switchContext(self: *Process, next: *Process) void {
     next.page_table.activate();
-    exception.saveCurrentKernelStack(next.stack[next.stack.len..].ptr);
+    trap.saveCurrentKernelStack(next.stack[next.stack.len..].ptr);
     self.context.switchTo(&next.context);
 }
 

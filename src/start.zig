@@ -1,5 +1,6 @@
 const root = @import("root");
-const exception = @import("exception.zig");
+
+const trap = @import("trap.zig");
 
 const bss = @extern([*]u8, .{ .name = "__bss" });
 const bss_end = @extern([*]u8, .{ .name = "__bss_end" });
@@ -16,8 +17,8 @@ export fn _start() linksection(".text.boot") callconv(.naked) noreturn {
 
 export fn kernelMain() callconv(.c) noreturn {
     @memset(bss[0 .. bss_end - bss], 0);
-    exception.initHandler();
-    exception.saveCurrentKernelStack(stack_top);
+    trap.initHandler();
+    trap.saveCurrentKernelStack(stack_top);
     @call(.always_inline, root.main, .{});
     while (true) asm volatile ("wfi");
 }

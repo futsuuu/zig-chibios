@@ -22,7 +22,7 @@ fn kernelEntry() align(4) callconv(.naked) noreturn {
         // sscratch = user_sp;
         \\ csrrw sp, sscratch, sp
         \\
-        // frame: TrapFrame = .{ ... };
+        // frame: Frame = .{ ... };
         // sp = &frame;
         \\ addi sp, sp, -4 * 31
         \\ sw ra,  4 * 0(sp)
@@ -103,7 +103,7 @@ fn kernelEntry() align(4) callconv(.naked) noreturn {
     );
 }
 
-export fn handleTrap(frame: *TrapFrame) void {
+export fn handleTrap(frame: *Frame) void {
     _ = frame;
     const scause = csr.scause.read();
     switch (scause) {
@@ -124,7 +124,7 @@ export fn handleTrap(frame: *TrapFrame) void {
     }
 }
 
-const TrapFrame = packed struct {
+const Frame = packed struct {
     ra: usize,
     gp: usize,
     tp: usize,
