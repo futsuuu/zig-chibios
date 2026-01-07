@@ -37,8 +37,8 @@ pub const std_options: std.Options = blk: {
     };
     break :blk .{
         .logFn = funcs.logFn,
-        .page_size_min = sv32.PhysAddr.page_size,
-        .page_size_max = sv32.PhysAddr.page_size,
+        .page_size_min = sv32.page_size,
+        .page_size_max = sv32.page_size,
     };
 };
 

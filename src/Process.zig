@@ -7,7 +7,7 @@ const trap = @import("trap.zig");
 const Process = @This();
 
 state: State,
-page_table: *sv32.PageTable,
+page_table: *sv32.RootPageTable,
 stack: [8192]u8 align(@alignOf(usize)),
 context: Context,
 
@@ -27,12 +27,12 @@ pub fn reset(self: *Process, allocator: Allocator, pc: usize) Allocator.Error!vo
     self.context = .init(&self.stack, pc);
     const kernel_page = @extern([*]usize, .{ .name = "__kernel_page" });
     const kernel_page_end = @extern([*]usize, .{ .name = "__kernel_page_end" });
-    const table1: *sv32.PageTable = try .init(allocator);
-    var paddr = @intFromPtr(kernel_page);
-    while (paddr < @intFromPtr(kernel_page_end)) : (paddr += @sizeOf(sv32.PageTable)) {
-        try table1.mapPage(allocator, paddr, @intCast(paddr), .rwx__);
+    const page_table: *sv32.RootPageTable = try .init(allocator);
+    var ppn = sv32.PhysAddr.getPageNumber(kernel_page);
+    while (ppn < sv32.PhysAddr.getPageNumber(kernel_page_end)) : (ppn += 1) {
+        try page_table.mapPage(allocator, @as(u32, ppn) * sv32.page_size, .init(ppn, .rwx));
     }
-    self.page_table = table1;
+    self.page_table = page_table;
 }
 
 fn switchContext(self: *Process, next: *Process) void {
