@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const csr = @import("csr.zig");
 
@@ -25,12 +26,12 @@ pub const PageTable = struct {
 
     const entry_count = PhysAddr.page_size / @sizeOf(Entry);
 
-    pub fn init(a: std.mem.Allocator) *PageTable {
-        const entries = a.alignedAlloc(
+    pub fn init(allocator: Allocator) Allocator.Error!*PageTable {
+        const entries = try allocator.alignedAlloc(
             Entry,
             .fromByteUnits(PhysAddr.page_size),
             entry_count,
-        ) catch @panic("OOM");
+        );
         return @ptrCast(entries.ptr);
     }
 
@@ -59,17 +60,17 @@ pub const PageTable = struct {
 
     pub fn mapPage(
         table1: *PageTable,
-        a: std.mem.Allocator,
+        allocator: Allocator,
         vaddr: u32,
         paddr: u34,
         flags: Entry.Flags,
-    ) void {
+    ) Allocator.Error!void {
         const virt_addr: VirtAddr = @bitCast(vaddr);
         const phys_addr: PhysAddr = @bitCast(paddr);
         std.debug.assert(virt_addr.offset == 0);
         const entry1 = &table1.entries[@intCast(virt_addr.vpn1)];
         if (!entry1.flags.valid) {
-            const table0: *PageTable = .init(a);
+            const table0 = try init(allocator);
             entry1.* = .init(table0.getAddr(), .{});
         }
         const table0: *PageTable = .fromAddr(entry1.getAddr());

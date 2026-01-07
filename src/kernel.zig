@@ -97,7 +97,7 @@ pub fn main() void {
     virtio.request(&virtq, register, .write, &buf, 0) catch @panic("write error");
 
     var proc_buf: [8]Process = undefined;
-    scheduler = .init(&proc_buf, std.heap.page_allocator);
+    scheduler = Process.Scheduler.init(std.heap.page_allocator, &proc_buf) catch @panic("OOM");
     _ = scheduler.spawn(&procAEntry) catch unreachable;
     _ = scheduler.spawn(&procBEntry) catch unreachable;
     scheduler.yield();

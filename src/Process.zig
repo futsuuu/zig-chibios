@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const sv32 = @import("sv32.zig");
 const trap = @import("trap.zig");
@@ -21,15 +22,15 @@ fn new() Process {
     };
 }
 
-pub fn reset(self: *Process, pc: usize, pt_allocator: std.mem.Allocator) void {
+pub fn reset(self: *Process, allocator: Allocator, pc: usize) Allocator.Error!void {
     self.state = .runnable;
     self.context = .init(&self.stack, pc);
     const kernel_page = @extern([*]usize, .{ .name = "__kernel_page" });
     const kernel_page_end = @extern([*]usize, .{ .name = "__kernel_page_end" });
-    const table1: *sv32.PageTable = .init(pt_allocator);
+    const table1: *sv32.PageTable = try .init(allocator);
     var paddr = @intFromPtr(kernel_page);
     while (paddr < @intFromPtr(kernel_page_end)) : (paddr += @sizeOf(sv32.PageTable)) {
-        table1.mapPage(pt_allocator, paddr, @intCast(paddr), .rwx__);
+        try table1.mapPage(allocator, paddr, @intCast(paddr), .rwx__);
     }
     self.page_table = table1;
 }
@@ -45,25 +46,25 @@ pub const Scheduler = struct {
     current: *Process,
     idle: *Process,
 
-    pt_allocator: std.mem.Allocator,
+    allocator: std.mem.Allocator,
 
-    pub fn init(buffer: []Process, pt_allocator: std.mem.Allocator) Scheduler {
+    pub fn init(allocator: Allocator, buffer: []Process) Allocator.Error!Scheduler {
         std.debug.assert(1 <= buffer.len);
         var list: std.ArrayList(Process) = .initBuffer(buffer);
         list.appendAssumeCapacity(.new());
         var idle = &list.items[list.items.len - 1];
-        idle.reset(0, pt_allocator);
+        try idle.reset(allocator, 0);
         return .{
             .list = list,
             .idle = idle,
             .current = idle,
-            .pt_allocator = pt_allocator,
+            .allocator = allocator,
         };
     }
 
     pub fn spawn(self: *Scheduler, func: *const fn () void) !*Process {
         const proc = self.getUnused() orelse try self.manage(.new());
-        proc.reset(@intFromPtr(func), self.pt_allocator);
+        try proc.reset(self.allocator, @intFromPtr(func));
         return proc;
     }
 
