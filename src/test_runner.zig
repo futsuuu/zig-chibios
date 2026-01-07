@@ -25,9 +25,9 @@ pub const os = struct {
     };
 };
 
-pub fn main() void {
+pub fn main() !noreturn {
     kernel.sbi.debug_console.writeByte('\n') catch {};
-    kernel.os.heap.initPageAllocator() catch @panic("OOM");
+    try kernel.os.heap.initPageAllocator();
 
     var has_err = false;
     for (@as([]const std.builtin.TestFn, builtin.test_functions)) |t| {

@@ -77,29 +77,26 @@ pub fn printPanicInfo(msg: []const u8, first_trace_addr: ?usize) void {
 
 var scheduler: Process.Scheduler = undefined;
 
-pub fn main() void {
+pub fn main() !void {
     defer log.info("exit", .{});
     sbi.debug_console.writeByte('\n') catch {};
 
-    os.heap.initPageAllocator() catch @panic("OOM");
+    try os.heap.initPageAllocator();
 
-    var virtq, const register = virtio.init(std.heap.page_allocator) catch |e| {
-        log.err("failed to initialize virtio: {}", .{e});
-        return;
-    } orelse {
-        log.err("virtio device not found", .{});
+    var virtq, const register = try virtio.init(std.heap.page_allocator) orelse {
+        log.warn("virtio device not found", .{});
         return;
     };
 
     var buf = std.mem.zeroes([512]u8);
-    virtio.request(&virtq, register, .read, &buf, 0) catch @panic("read error");
+    try virtio.request(&virtq, register, .read, &buf, 0);
     @memcpy(buf[0..].ptr, "hello world!");
-    virtio.request(&virtq, register, .write, &buf, 0) catch @panic("write error");
+    try virtio.request(&virtq, register, .write, &buf, 0);
 
     var proc_buf: [8]Process = undefined;
-    scheduler = Process.Scheduler.init(std.heap.page_allocator, &proc_buf) catch @panic("OOM");
-    _ = scheduler.spawn(&procAEntry) catch unreachable;
-    _ = scheduler.spawn(&procBEntry) catch unreachable;
+    scheduler = try .init(std.heap.page_allocator, &proc_buf);
+    _ = try scheduler.spawn(&procAEntry);
+    _ = try scheduler.spawn(&procBEntry);
     scheduler.yield();
 }
 

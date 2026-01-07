@@ -1,4 +1,5 @@
 const root = @import("root");
+const std = @import("std");
 
 const trap = @import("trap.zig");
 
@@ -19,6 +20,16 @@ export fn kernelMain() callconv(.c) noreturn {
     @memset(bss[0 .. bss_end - bss], 0);
     trap.initHandler();
     trap.saveCurrentKernelStack(stack_top);
-    @call(.always_inline, root.main, .{});
+    switch (@typeInfo(@TypeOf(root.main)).@"fn".return_type.?) {
+        void, noreturn => {
+            root.main();
+        },
+        else => |ReturnType| {
+            std.debug.assert(@typeInfo(ReturnType) == .error_union);
+            root.main() catch |e| {
+                std.debug.panic("root.main() returns {}", .{e});
+            };
+        },
+    }
     while (true) asm volatile ("wfi");
 }

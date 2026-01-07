@@ -44,6 +44,7 @@ pub fn request(
 }
 
 pub fn init(a: std.mem.Allocator) !?struct { Queue, *mmio.Register(block.Config, block.Feature) } {
+    errdefer log.err("initialization failed", .{});
     const qemu = @import("qemu.zig");
     const reg_header = try mmio.RegisterHeader.init(qemu.virt_virtio.base);
     switch (reg_header.device_id.read()) {
