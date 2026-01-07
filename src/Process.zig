@@ -8,7 +8,7 @@ const Process = @This();
 
 state: State,
 page_table: sv32.RootPageTable,
-stack: [8192]u8 align(@alignOf(usize)),
+stack: []align(@alignOf(usize)) u8,
 context: Context,
 
 const State = enum { unused, runnable };
@@ -22,9 +22,10 @@ fn new() Process {
     };
 }
 
-pub fn reset(self: *Process, allocator: Allocator, pc: usize) Allocator.Error!void {
+pub fn reset(self: *Process, allocator: Allocator, pc: usize, stack_size: usize) Allocator.Error!void {
     self.state = .runnable;
-    self.context = .init(&self.stack, pc);
+    self.stack = try allocator.alignedAlloc(u8, .of(usize), stack_size);
+    self.context = .init(self.stack, pc);
     const kernel_page = @extern(*align(sv32.page_size) u8, .{ .name = "__kernel_page" });
     const kernel_page_end = @extern(*align(sv32.page_size) u8, .{ .name = "__kernel_page_end" });
     const page_table: sv32.RootPageTable = try .init(allocator);
@@ -43,46 +44,44 @@ fn switchContext(self: *Process, next: *Process) void {
 
 pub const Scheduler = struct {
     list: std.ArrayList(Process),
-    current: *Process,
-    idle: *Process,
+    current: usize,
+    idle: usize,
 
     allocator: std.mem.Allocator,
 
-    pub fn init(allocator: Allocator, buffer: []Process) Allocator.Error!Scheduler {
-        std.debug.assert(1 <= buffer.len);
-        var list: std.ArrayList(Process) = .initBuffer(buffer);
+    pub fn init(allocator: Allocator) Allocator.Error!Scheduler {
+        var list: std.ArrayList(Process) = try .initCapacity(allocator, 1);
         list.appendAssumeCapacity(.new());
         var idle = &list.items[list.items.len - 1];
-        try idle.reset(allocator, 0);
+        try idle.reset(allocator, 0, 1024);
         return .{
             .list = list,
-            .idle = idle,
-            .current = idle,
+            .idle = 0,
+            .current = 0,
             .allocator = allocator,
         };
     }
 
-    pub fn spawn(self: *Scheduler, func: *const fn () void) !*Process {
+    pub fn spawn(self: *Scheduler, func: *const fn () void, stack_size: usize) Allocator.Error!*Process {
         const proc = self.getUnused() orelse try self.manage(.new());
-        try proc.reset(self.allocator, @intFromPtr(func));
+        try proc.reset(self.allocator, @intFromPtr(func), stack_size);
         return proc;
     }
 
     pub fn yield(self: *Scheduler) void {
         const next = self.getNext() orelse return;
-        const prev = self.current;
-        self.current = next;
+        const prev = &self.list.items[self.current];
+        self.current = next - self.list.items.ptr;
         prev.switchContext(next);
     }
 
     fn getNext(self: *Scheduler) ?*Process {
-        const current_idx = self.current - self.list.items.ptr;
-        return for (0..current_idx) |i| {
+        return for (self.current + 1..self.list.items.len) |i| {
             const p = &self.list.items[i];
-            if (p.state == .runnable and p != self.idle) break p;
-        } else for (current_idx + 1..self.list.items.len) |i| {
+            if (p.state == .runnable and i != self.idle) break p;
+        } else for (0..self.current) |i| {
             const p = &self.list.items[i];
-            if (p.state == .runnable and p != self.idle) break p;
+            if (p.state == .runnable and i != self.idle) break p;
         } else null;
     }
 
@@ -92,8 +91,8 @@ pub const Scheduler = struct {
         } else null;
     }
 
-    fn manage(self: *Scheduler, process: Process) !*Process {
-        try self.list.appendBounded(process);
+    fn manage(self: *Scheduler, process: Process) Allocator.Error!*Process {
+        try self.list.append(self.allocator, process);
         return &self.list.items[self.list.items.len - 1];
     }
 };
@@ -118,7 +117,7 @@ pub const Context = struct {
     };
 
     fn init(stack: []align(@alignOf(usize)) u8, return_address: usize) Context {
-        var stack_usize = @as([*]usize, @ptrCast(stack))[0 .. stack.len / @sizeOf(usize)];
+        const stack_usize = @as([*]usize, @ptrCast(stack))[0 .. stack.len / @sizeOf(usize)];
         const format: *Format = @ptrCast(&stack_usize[stack_usize.len - @sizeOf(Format) / @sizeOf(usize)]);
         format.* = .{
             .ra = return_address,

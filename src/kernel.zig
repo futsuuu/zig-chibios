@@ -93,10 +93,9 @@ pub fn main() !void {
     @memcpy(buf[0..].ptr, "hello world!");
     try virtio.request(&virtq, register, .write, &buf, 0);
 
-    var proc_buf: [8]Process = undefined;
-    scheduler = try .init(std.heap.page_allocator, &proc_buf);
-    _ = try scheduler.spawn(&procAEntry);
-    _ = try scheduler.spawn(&procBEntry);
+    scheduler = try .init(std.heap.page_allocator);
+    _ = try scheduler.spawn(&procAEntry, 8192);
+    _ = try scheduler.spawn(&procBEntry, 8192);
     scheduler.yield();
 }
 
