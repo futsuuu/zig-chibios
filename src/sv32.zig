@@ -121,15 +121,37 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
                 dirty: bool = false,
                 _: u2 = 0,
 
-                const ptr: Flags = if (layer > 0) .{} else unreachable;
-                pub const rwx: Flags = if (layer == 0) .{
-                    .readable = true,
-                    .writable = true,
-                    .executable = true,
-                } else unreachable;
+                pub fn format(self: Flags, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+                    try writer.writeByte(if (0 < self._ & 0b10) '1' else '-');
+                    try writer.writeByte(if (0 < self._ & 0b01) '1' else '-');
+                    try writer.writeByte(if (self.dirty) 'd' else '-');
+                    try writer.writeByte(if (self.accessed) 'a' else '-');
+                    try writer.writeByte(if (self.global) 'g' else '-');
+                    try writer.writeByte(if (self.usermode) 'u' else '-');
+                    try writer.writeByte(if (self.executable) 'x' else '-');
+                    try writer.writeByte(if (self.writable) 'w' else '-');
+                    try writer.writeByte(if (self.readable) 'r' else '-');
+                    try writer.writeByte(if (self.valid) 'v' else '-');
+                }
+
+                const valid_flags = if (layer == 0) .{ r, rw, x, rx, rwx } else .{ptr};
+                const ptr: Flags = .{};
+                pub const r: Flags = .{ .readable = true };
+                pub const rw: Flags = .{ .readable = true, .writable = true };
+                pub const x: Flags = .{ .executable = true };
+                pub const rx: Flags = .{ .readable = true, .executable = true };
+                pub const rwx: Flags = .{ .readable = true, .writable = true, .executable = true };
             };
 
-            pub fn init(ppn: PhysAddr.PageNumber, flags: Flags) Entry {
+            pub fn init(ppn: PhysAddr.PageNumber, comptime flags: Flags) Entry {
+                comptime for (Flags.valid_flags) |valid| {
+                    if (flags == valid) break;
+                } else {
+                    @compileError(std.fmt.comptimePrint(
+                        "invalid flags for layer {}: {f}",
+                        .{ layer, flags },
+                    ));
+                };
                 return .{ .ppn = ppn, .flags = flags };
             }
 
