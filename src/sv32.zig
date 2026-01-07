@@ -16,7 +16,7 @@ pub const VirtAddr = packed struct(u32) {
     pub const Layer = u1;
     pub const max_layer: Layer = 1;
 
-    fn PageNumber(layer: Layer) type {
+    fn PageNumberType(layer: Layer) type {
         return @FieldType(VirtAddr, switch (layer) {
             0 => "page_number_0",
             1 => "page_number_1",
@@ -24,17 +24,25 @@ pub const VirtAddr = packed struct(u32) {
     }
 
     fn entryCount(layer: Layer) usize {
-        return 1 << @bitSizeOf(PageNumber(layer));
+        return 1 << @bitSizeOf(PageNumberType(layer));
     }
 };
 
 pub const PhysAddr = packed struct(u34) {
     offset: u12,
-    page_number: u22,
+    page_number: PageNumber,
 
-    pub fn getPageNumber(ptr: *const anyopaque) u22 {
-        return @intCast(@intFromPtr(ptr) / page_size);
-    }
+    pub const PageNumber = packed struct {
+        num: u22,
+
+        pub fn fromPtr(ptr: *align(page_size) const anyopaque) PageNumber {
+            return .{ .num = @intCast(@intFromPtr(ptr) / page_size) };
+        }
+
+        pub fn toPtr(self: PageNumber) *align(page_size) anyopaque {
+            return @ptrFromInt(@as(usize, self.num) * page_size);
+        }
+    };
 };
 
 pub const RootPageTable = PageTable(VirtAddr.max_layer);
@@ -46,21 +54,21 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
     return struct {
         const Self = @This();
 
-        entries: [entry_count]Entry,
+        entries: *align(page_size) [entry_count]Entry,
 
-        pub fn init(allocator: Allocator) Allocator.Error!*Self {
+        pub fn init(allocator: Allocator) Allocator.Error!Self {
             const entries = try allocator.alignedAlloc(
                 Entry,
                 .fromByteUnits(page_size),
                 entry_count,
             );
-            return @ptrCast(entries.ptr);
+            return .{ .entries = entries[0..entry_count] };
         }
 
-        pub fn activate(self: *RootPageTable) void {
+        pub fn activate(self: RootPageTable) void {
             const satp: csr.satp.Format = .{
                 .mode = .sv32,
-                .phys_page_num = self.getAddr().page_number,
+                .phys_page_num = self.getPageNumber().num,
                 .addr_space_id = 0,
             };
             asm volatile (
@@ -72,20 +80,20 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
             );
         }
 
-        fn getAddr(self: *const Self) PhysAddr {
-            return @bitCast(@as(u34, @intCast(@intFromPtr(self))));
+        fn fromPageNumber(ppn: PhysAddr.PageNumber) Self {
+            return .{ .entries = @ptrCast(ppn.toPtr()) };
         }
 
-        fn fromAddr(paddr: PhysAddr) *Self {
-            return @ptrFromInt(@as(usize, @intCast(@as(u34, @bitCast(paddr)))));
+        fn getPageNumber(self: Self) PhysAddr.PageNumber {
+            return .fromPtr(self.entries);
         }
 
-        fn getEntry(self: *Self, vpn: VirtAddr.PageNumber(layer)) *Entry {
+        fn getEntry(self: Self, vpn: VirtAddr.PageNumberType(layer)) *Entry {
             return &self.entries[vpn];
         }
 
         pub fn mapPage(
-            table1: *RootPageTable,
+            table1: RootPageTable,
             allocator: Allocator,
             vaddr: u32,
             entry: LeafEntry,
@@ -100,7 +108,7 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
 
         pub const Entry = packed struct(u32) {
             flags: Flags,
-            ppn: u22,
+            ppn: PhysAddr.PageNumber,
 
             pub const Flags = packed struct {
                 valid: bool = true,
@@ -121,18 +129,16 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
                 } else unreachable;
             };
 
-            pub fn init(ppn: u22, flags: Flags) Entry {
+            pub fn init(ppn: PhysAddr.PageNumber, flags: Flags) Entry {
                 return .{ .ppn = ppn, .flags = flags };
             }
 
-            fn getOrInitTable(self: *Entry, allocator: Allocator) Allocator.Error!*PageTable(layer - 1) {
+            fn getOrInitTable(self: *Entry, allocator: Allocator) Allocator.Error!PageTable(layer - 1) {
                 if (self.flags.valid) {
-                    return .fromAddr(self.getAddr());
+                    return .fromPageNumber(self.ppn);
                 }
-                const table: *PageTable(layer - 1) = try .init(allocator);
-                const paddr = table.getAddr();
-                std.debug.assert(paddr.offset == 0);
-                self.* = .init(paddr.page_number, .ptr);
+                const table: PageTable(layer - 1) = try .init(allocator);
+                self.* = .init(table.getPageNumber(), .ptr);
                 return table;
             }
 

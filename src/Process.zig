@@ -7,7 +7,7 @@ const trap = @import("trap.zig");
 const Process = @This();
 
 state: State,
-page_table: *sv32.RootPageTable,
+page_table: sv32.RootPageTable,
 stack: [8192]u8 align(@alignOf(usize)),
 context: Context,
 
@@ -25,12 +25,12 @@ fn new() Process {
 pub fn reset(self: *Process, allocator: Allocator, pc: usize) Allocator.Error!void {
     self.state = .runnable;
     self.context = .init(&self.stack, pc);
-    const kernel_page = @extern([*]usize, .{ .name = "__kernel_page" });
-    const kernel_page_end = @extern([*]usize, .{ .name = "__kernel_page_end" });
-    const page_table: *sv32.RootPageTable = try .init(allocator);
-    var ppn = sv32.PhysAddr.getPageNumber(kernel_page);
-    while (ppn < sv32.PhysAddr.getPageNumber(kernel_page_end)) : (ppn += 1) {
-        try page_table.mapPage(allocator, @as(u32, ppn) * sv32.page_size, .init(ppn, .rwx));
+    const kernel_page = @extern(*align(sv32.page_size) u8, .{ .name = "__kernel_page" });
+    const kernel_page_end = @extern(*align(sv32.page_size) u8, .{ .name = "__kernel_page_end" });
+    const page_table: sv32.RootPageTable = try .init(allocator);
+    var ppn = sv32.PhysAddr.PageNumber.fromPtr(kernel_page);
+    while (ppn.num < sv32.PhysAddr.PageNumber.fromPtr(kernel_page_end).num) : (ppn.num += 1) {
+        try page_table.mapPage(allocator, @intFromPtr(ppn.toPtr()), .init(ppn, .rwx));
     }
     self.page_table = page_table;
 }
