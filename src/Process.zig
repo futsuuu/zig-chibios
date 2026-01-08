@@ -36,10 +36,10 @@ pub fn reset(self: *Process, allocator: Allocator, pc: usize, stack_size: usize)
     self.page_table = page_table;
 }
 
-fn switchContext(self: *Process, next: *Process) void {
+fn switchContext(self: *Process, next: *const Process) void {
     next.page_table.activate();
     trap.saveCurrentKernelStack(next.stack[next.stack.len..].ptr);
-    self.context.switchTo(&next.context);
+    self.context.switchTo(next.context);
 }
 
 pub const Scheduler = struct {
@@ -98,9 +98,9 @@ pub const Scheduler = struct {
 };
 
 pub const Context = struct {
-    stack_pointer: *Format,
+    stack_ptr: *const Registers,
 
-    const Format = extern struct {
+    const Registers = extern struct {
         ra: usize,
         s0: usize = 0,
         s1: usize = 0,
@@ -118,12 +118,12 @@ pub const Context = struct {
 
     fn init(stack: []align(@alignOf(usize)) u8, return_address: usize) Context {
         const stack_usize = @as([*]usize, @ptrCast(stack))[0 .. stack.len / @sizeOf(usize)];
-        const format: *Format = @ptrCast(&stack_usize[stack_usize.len - @sizeOf(Format) / @sizeOf(usize)]);
-        format.* = .{
+        const reg: *Registers = @ptrCast(&stack_usize[stack_usize.len - @sizeOf(Registers) / @sizeOf(usize)]);
+        reg.* = .{
             .ra = return_address,
         };
         return .{
-            .stack_pointer = format,
+            .stack_ptr = reg,
         };
     }
     test init {
@@ -137,17 +137,17 @@ pub const Context = struct {
     }
 
     // FIXME: I don't know why this doesn't work when inlined :(
-    noinline fn switchTo(self: *Context, next: *Context) void {
+    noinline fn switchTo(self: *Context, next: Context) void {
         asm volatile ("jalr ra, %[func]"
             :
-            : [prev] "{a0}" (&self.stack_pointer),
-              [next] "{a1}" (&next.stack_pointer),
+            : [prev] "{a0}" (&self.stack_ptr),
+              [next] "{a1}" (&next.stack_ptr),
               [func] "r" (&swtch),
             : .{ .x1 = true }); // ra
     }
     fn swtch(
         // prev: *sp,
-        // next: *sp,
+        // next: *const sp,
     ) callconv(.naked) noreturn {
         asm volatile (
             \\ addi sp, sp, -13 * 4
@@ -191,14 +191,14 @@ pub const Context = struct {
             var cx_b: Context = undefined;
             fn entryA() void {
                 for (0..45678) |_| {
-                    cx_a.switchTo(&cx_b);
+                    cx_a.switchTo(cx_b);
                 }
             }
             var counter: usize = 0;
             fn entryB() void {
                 while (true) {
                     counter += 1;
-                    cx_b.switchTo(&cx_a);
+                    cx_b.switchTo(cx_a);
                 }
             }
         };
