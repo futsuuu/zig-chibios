@@ -13,27 +13,28 @@ context: Context,
 
 const State = enum { unused, runnable };
 
-fn new() Process {
-    return .{
-        .state = .unused,
-        .page_table = undefined,
-        .stack = undefined,
-        .context = undefined,
-    };
-}
+const uninit: Process = .{
+    .state = .unused,
+    .page_table = undefined,
+    .stack = undefined,
+    .context = undefined,
+};
 
-pub fn reset(self: *Process, allocator: Allocator, pc: usize, stack_size: usize) Allocator.Error!void {
-    self.state = .runnable;
-    self.stack = try allocator.alignedAlloc(u8, .of(usize), stack_size);
-    self.context = .init(self.stack, pc);
+fn init(allocator: Allocator, pc: usize, stack_size: usize) Allocator.Error!Process {
+    const stack = try allocator.alignedAlloc(u8, .of(usize), stack_size);
+    var self: Process = .{
+        .state = .runnable,
+        .page_table = try .init(allocator),
+        .stack = stack,
+        .context = .init(stack, pc),
+    };
     const kernel_page = @extern(*align(sv32.page_size) u8, .{ .name = "__kernel_page" });
     const kernel_page_end = @extern(*align(sv32.page_size) u8, .{ .name = "__kernel_page_end" });
-    const page_table: sv32.RootPageTable = try .init(allocator);
     var ppn = sv32.PhysAddr.PageNumber.fromPtr(kernel_page);
     while (ppn.num < sv32.PhysAddr.PageNumber.fromPtr(kernel_page_end).num) : (ppn.num += 1) {
-        try page_table.mapPage(allocator, @intFromPtr(ppn.toPtr()), .init(ppn, .rwx));
+        try self.page_table.mapPage(allocator, @intFromPtr(ppn.toPtr()), .init(ppn, .rwx));
     }
-    self.page_table = page_table;
+    return self;
 }
 
 fn switchContext(self: *Process, next: *const Process) void {
@@ -51,9 +52,7 @@ pub const Scheduler = struct {
 
     pub fn init(allocator: Allocator) Allocator.Error!Scheduler {
         var list: std.ArrayList(Process) = try .initCapacity(allocator, 1);
-        list.appendAssumeCapacity(.new());
-        var idle = &list.items[list.items.len - 1];
-        try idle.reset(allocator, 0, 1024);
+        list.appendAssumeCapacity(try .init(allocator, 0, 64));
         return .{
             .list = list,
             .idle = 0,
@@ -63,8 +62,8 @@ pub const Scheduler = struct {
     }
 
     pub fn spawn(self: *Scheduler, func: *const fn () void, stack_size: usize) Allocator.Error!*Process {
-        const proc = self.getUnused() orelse try self.manage(.new());
-        try proc.reset(self.allocator, @intFromPtr(func), stack_size);
+        const proc = self.getUnused() orelse try self.manage(.uninit);
+        proc.* = try .init(self.allocator, @intFromPtr(func), stack_size);
         return proc;
     }
 
@@ -126,9 +125,9 @@ pub const Context = struct {
             .stack_ptr = reg,
         };
     }
-    test init {
+    test "Context.init" {
         var stack: [1024]u8 align(@alignOf(usize)) = undefined;
-        _ = init(&stack, 7);
+        _ = Context.init(&stack, 7);
         const s = @as([*]usize, @ptrCast(&stack))[0 .. stack.len / @sizeOf(usize)];
         try std.testing.expect(7 == s[s.len - 13]);
         try std.testing.expect(0 == s[s.len - 12]);
