@@ -107,10 +107,12 @@ fn delay() void {
 
 fn procAEntry() void {
     log.debug("starting process A", .{});
-    while (true) {
+    var counter: usize = 0;
+    while (true) : (counter += 1) {
         sbi.debug_console.writeByte('A') catch {};
         scheduler.yield();
         delay();
+        if (counter == 20) scheduler.exit();
     }
 }
 

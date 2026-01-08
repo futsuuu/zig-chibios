@@ -62,7 +62,15 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
                 .fromByteUnits(page_size),
                 entry_count,
             );
+            @memset(entries, .{
+                .ppn = undefined,
+                .flags = .{ .valid = false },
+            });
             return .{ .entries = entries[0..entry_count] };
+        }
+
+        pub fn deinit(self: *Self, allocator: Allocator) void {
+            allocator.free(self.entries);
         }
 
         pub fn activate(self: RootPageTable) void {

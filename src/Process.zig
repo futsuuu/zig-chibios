@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const log = std.log.scoped(.process);
 
 const sv32 = @import("sv32.zig");
 const trap = @import("trap.zig");
@@ -35,6 +36,19 @@ fn init(allocator: Allocator, pc: usize, stack_size: usize) Allocator.Error!Proc
         try self.page_table.mapPage(allocator, @intFromPtr(ppn.toPtr()), .init(ppn, .rwx));
     }
     return self;
+}
+
+fn deinit(self: *Process, allocator: Allocator, next: ?*const Process) void {
+    if (next) |p| {
+        p.page_table.activate();
+    }
+    self.page_table.deinit(allocator);
+    allocator.free(self.stack);
+    self.* = .uninit;
+    if (next) |p| {
+        trap.saveCurrentKernelStack(p.stack[p.stack.len..].ptr);
+        p.context.overwrite();
+    }
 }
 
 fn switchContext(self: *Process, next: *const Process) void {
@@ -74,11 +88,15 @@ pub const Scheduler = struct {
         prev.switchContext(next);
     }
 
+    pub fn exit(self: *Scheduler) void {
+        self.list.items[self.current].deinit(self.allocator, self.getNext());
+    }
+
     fn getNext(self: *Scheduler) ?*Process {
         return for (self.current + 1..self.list.items.len) |i| {
             const p = &self.list.items[i];
             if (p.state == .runnable and i != self.idle) break p;
-        } else for (0..self.current) |i| {
+        } else for (0..self.current + 1) |i| {
             const p = &self.list.items[i];
             if (p.state == .runnable and i != self.idle) break p;
         } else null;
@@ -133,6 +151,29 @@ pub const Context = struct {
         try std.testing.expect(0 == s[s.len - 12]);
         try std.testing.expect(0 == s[s.len - 2]);
         try std.testing.expect(0 == s[s.len - 1]);
+    }
+
+    fn overwrite(self: Context) void {
+        asm volatile (
+            \\ lw sp, (%[next])
+            \\ lw ra,  0  * 4(sp)
+            \\ lw s0,  1  * 4(sp)
+            \\ lw s1,  2  * 4(sp)
+            \\ lw s2,  3  * 4(sp)
+            \\ lw s3,  4  * 4(sp)
+            \\ lw s4,  5  * 4(sp)
+            \\ lw s5,  6  * 4(sp)
+            \\ lw s6,  7  * 4(sp)
+            \\ lw s7,  8  * 4(sp)
+            \\ lw s8,  9  * 4(sp)
+            \\ lw s9,  10 * 4(sp)
+            \\ lw s10, 11 * 4(sp)
+            \\ lw s11, 12 * 4(sp)
+            \\ addi sp, sp, 13 * 4
+            \\ ret
+            :
+            : [next] "r" (&self.stack_ptr),
+            : .{ .memory = true });
     }
 
     // FIXME: I don't know why this doesn't work when inlined :(
