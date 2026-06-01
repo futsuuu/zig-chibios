@@ -54,8 +54,8 @@ pub fn build(b: *std.Build) void {
         "-device",
         "virtio-blk-device,bus=virtio-mmio-bus.0,drive=drive0,packed=true",
         "-kernel",
-        b.getInstallPath(.bin, kernel.name),
     });
+    run_cmd.addArtifactArg(kernel);
     run_cmd.step.dependOn(b.getInstallStep());
     run_step.dependOn(&run_cmd.step);
 
