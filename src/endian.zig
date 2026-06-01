@@ -11,7 +11,7 @@ fn Converter(T: type, endian: std.builtin.Endian) type {
     return packed struct {
         int: Int,
 
-        const Int = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const Int = @Int(.unsigned, @bitSizeOf(T));
 
         pub inline fn fromNative(x: T) @This() {
             const native: Int = switch (@typeInfo(T)) {

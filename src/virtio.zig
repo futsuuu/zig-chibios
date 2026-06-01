@@ -35,7 +35,7 @@ pub fn request(
 
     asm volatile ("fence rw, rw" ::: .{ .memory = true });
     if (virtq.device_event.getEnabled()) |_| {
-        register.queue_notify.write(.{ .index = virtq.index });
+        register.queue_notify.write(.{ .vq_index = virtq.index, .data = undefined });
     }
     while (!virtq.isUsed(header_desc)) {
         asm volatile ("nop");
@@ -114,3 +114,7 @@ pub const DeviceType = enum(u32) {
     reserved = 0,
     block = 2,
 };
+
+comptime {
+    std.testing.refAllDecls(@This());
+}

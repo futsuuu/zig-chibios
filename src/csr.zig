@@ -2,7 +2,7 @@ const std = @import("std");
 
 const sxlen = @bitSizeOf(usize);
 
-fn Register(name: @Type(.enum_literal), T: type) type {
+fn Register(name: @EnumLiteral(), T: type) type {
     return struct {
         pub const Format = if (hasDecl("Format")) T.Format else T;
 
@@ -35,7 +35,7 @@ fn Register(name: @Type(.enum_literal), T: type) type {
 }
 
 fn UInt(bit_count: u16) type {
-    return std.meta.Int(.unsigned, bit_count);
+    return @Int(.unsigned, bit_count);
 }
 
 fn formatEnum(ptr: anytype, writer: *std.Io.Writer) std.Io.Writer.Error!void {

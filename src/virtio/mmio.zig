@@ -143,11 +143,12 @@ fn splitAddr(addr: usize) struct { u32, u32 } {
     };
 }
 
-pub const QueueNotifier = packed union {
-    index: u16,
+pub const QueueNotifier = packed struct(u32) {
+    /// MMIO devices never use this field as vq_notif_config_data
+    /// even if VIRTIO_F_NOTIF_CONFIG_DATA has been negotiated.
+    vq_index: u16,
     /// Used when VIRTIO_F_NOTIFICATION_DATA has been negotiated.
-    data: packed struct(u32) {
-        vq_index: u16,
+    data: packed struct(u16) {
         next_offset: u15,
         next_wrap: bool,
     },
@@ -171,7 +172,7 @@ fn RegisterField(offset: usize, direction: enum { r, w, rw }, T: type) type {
         }
 
         pub inline fn writeBit(self: *@This(), bitflags: T) void {
-            const Int = std.meta.Int(.unsigned, @bitSizeOf(T));
+            const Int = @Int(.unsigned, @bitSizeOf(T));
             const lhs: Int = @bitCast(self.read());
             const rhs: Int = @bitCast(bitflags);
             self.write(@bitCast(lhs | rhs));

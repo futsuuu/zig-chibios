@@ -70,7 +70,7 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
         }
 
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            allocator.free(self.entries);
+            allocator.free(@as([]Entry, self.entries));
         }
 
         pub fn activate(self: RootPageTable) void {

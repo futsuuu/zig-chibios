@@ -25,7 +25,7 @@ pub const std_options: std.Options = blk: {
     const funcs = struct {
         fn logFn(
             comptime level: std.log.Level,
-            comptime scope: @Type(.enum_literal),
+            comptime scope: @EnumLiteral(),
             comptime format: []const u8,
             args: anytype,
         ) void {
@@ -64,15 +64,17 @@ pub const os = struct {
 pub fn printPanicInfo(msg: []const u8, first_trace_addr: ?usize) void {
     @branchHint(.cold);
     log.err("PANIC: {s}", .{msg});
-    var iter: std.debug.StackIterator = .init(first_trace_addr, null);
-    var index: usize = 0;
-    while (iter.next()) |addr| : (index += 1) {
-        switch (builtin.target.ptrBitWidth()) {
-            32 => log.err("{:0>3}: 0x{x:0>8}", .{ index, addr }),
-            64 => log.err("{:0>3}: 0x{x:0>16}", .{ index, addr }),
-            else => unreachable,
-        }
-    }
+    _ = first_trace_addr;
+    // FIXME: replace StackIterator with captureCurrentStackTrace
+    // var iter: std.debug.StackIterator = .init(first_trace_addr, null);
+    // var index: usize = 0;
+    // while (iter.next()) |addr| : (index += 1) {
+    //     switch (builtin.target.ptrBitWidth()) {
+    //         32 => log.err("{:0>3}: 0x{x:0>8}", .{ index, addr }),
+    //         64 => log.err("{:0>3}: 0x{x:0>16}", .{ index, addr }),
+    //         else => unreachable,
+    //     }
+    // }
 }
 
 var scheduler: Process.Scheduler = undefined;
@@ -126,5 +128,5 @@ fn procBEntry() void {
 }
 
 comptime {
-    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(@This());
 }
