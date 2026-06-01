@@ -155,10 +155,10 @@ pub const stvec = Register(.stvec, struct {
         return @bitCast(@intFromPtr(self.ptr) + @intFromEnum(self.mode));
     }
     test encode {
-        try std.testing.expect(std.meta.eql(
+        try std.testing.expectEqual(
             Format{ .mode = .vectored, .base_addr = 0x12340 >> 2 },
             encode(.{ .mode = .vectored, .ptr = @ptrFromInt(0x12340) }),
-        ));
+        );
     }
 
     fn decode(value: Format) @This() {
@@ -168,9 +168,9 @@ pub const stvec = Register(.stvec, struct {
         };
     }
     test decode {
-        try std.testing.expect(std.meta.eql(
+        try std.testing.expectEqual(
             @This(){ .mode = .vectored, .ptr = @ptrFromInt(0x12340) },
             decode(.{ .mode = .vectored, .base_addr = 0x12340 >> 2 }),
-        ));
+        );
     }
 });

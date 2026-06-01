@@ -188,12 +188,16 @@ pub const debug_console = struct {
             .buffer = &.{},
             .vtable = &.{
                 .drain = drain,
-                .flush = std.Io.Writer.noopFlush,
+                .flush = std.Io.Writer.defaultFlush,
             },
         };
     }
 
-    fn drain(_: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        if (w.end != 0) {
+            write(w.buffer[0..w.end]) catch return error.WriteFailed;
+            w.end = 0;
+        }
         var written: usize = 0;
         for (data) |bytes| {
             written += bytes.len;
@@ -201,7 +205,7 @@ pub const debug_console = struct {
         }
         const last = data[data.len - 1];
         written += last.len * (splat - 1);
-        for (0..(splat - 1)) |_| {
+        for (0..splat - 1) |_| {
             write(last) catch return error.WriteFailed;
         }
         return written;

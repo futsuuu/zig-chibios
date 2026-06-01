@@ -13,11 +13,12 @@ pub const panic = std.debug.FullPanic(struct {
 }.panic);
 
 pub const std_options: std.Options = .{
-    .logFn = kernel.std_options.logFn,
     .log_level = .debug,
     .page_size_min = 4 << 10,
     .page_size_max = 4 << 10,
 };
+
+pub const std_options_debug_io = kernel.std_options_debug_io;
 
 pub const os = struct {
     pub const heap = struct {
@@ -26,7 +27,7 @@ pub const os = struct {
 };
 
 pub fn main() !noreturn {
-    kernel.sbi.debug_console.writeByte('\n') catch {};
+    std.debug.print("\n", .{});
     try kernel.os.heap.initPageAllocator();
 
     var has_err = false;
@@ -41,7 +42,7 @@ pub fn main() !noreturn {
     }
 
     if (has_err) {
-        kernel.sbi.debug_console.writeByte('\n') catch {};
+        std.debug.print("\n", .{});
         VirtTest.write(.{ .status = .fail, .code = 1 });
     } else {
         VirtTest.write(.{ .status = .pass, .code = 0 });

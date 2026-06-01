@@ -21,26 +21,48 @@ pub const panic = std.debug.FullPanic(struct {
     }
 }.panic);
 
-pub const std_options: std.Options = blk: {
-    const funcs = struct {
-        fn logFn(
-            comptime level: std.log.Level,
-            comptime scope: @EnumLiteral(),
-            comptime format: []const u8,
-            args: anytype,
-        ) void {
-            const level_text = comptime level.asText();
-            const scope_text = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
-            var writer = sbi.debug_console.writer();
-            writer.print(level_text ++ scope_text ++ format ++ "\n", args) catch {};
-        }
-    };
-    break :blk .{
-        .logFn = funcs.logFn,
-        .page_size_min = sv32.page_size,
-        .page_size_max = sv32.page_size,
-    };
+pub const std_options: std.Options = .{
+    .page_size_min = sv32.page_size,
+    .page_size_max = sv32.page_size,
 };
+
+pub const std_options_debug_io: std.Io = .{
+    .userdata = null,
+    .vtable = &debug_vtable,
+};
+
+const debug_vtable: std.Io.VTable = blk: {
+    var vtable: std.Io.VTable = std.Io.failing.vtable.*;
+    vtable.swapCancelProtection = debugSwapCancelProtection;
+    vtable.lockStderr = debugLockStderr;
+    vtable.unlockStderr = debugUnlockStderr;
+    break :blk vtable;
+};
+
+var debug_file_writer: std.Io.File.Writer = .{
+    .io = undefined,
+    .file = .{
+        .handle = {},
+        .flags = .{ .nonblocking = false },
+    },
+    .interface = sbi.debug_console.writer(),
+};
+
+fn debugSwapCancelProtection(_: ?*anyopaque, _: std.Io.CancelProtection) std.Io.CancelProtection {
+    return .blocked;
+}
+
+fn debugLockStderr(_: ?*anyopaque, terminal_mode: ?std.Io.Terminal.Mode) std.Io.Cancelable!std.Io.LockedStderr {
+    return .{
+        .file_writer = &debug_file_writer,
+        .terminal_mode = terminal_mode orelse .escape_codes,
+    };
+}
+
+fn debugUnlockStderr(_: ?*anyopaque) void {
+    debug_file_writer.interface.flush() catch {};
+    debug_file_writer.interface.buffer = &.{};
+}
 
 pub const os = struct {
     pub const heap = struct {
@@ -81,7 +103,7 @@ var scheduler: Process.Scheduler = undefined;
 
 pub fn main() !void {
     defer log.info("exit", .{});
-    sbi.debug_console.writeByte('\n') catch {};
+    std.debug.print("\n", .{});
 
     try os.heap.initPageAllocator();
 
@@ -111,7 +133,7 @@ fn procAEntry() void {
     log.debug("starting process A", .{});
     var counter: usize = 0;
     while (true) : (counter += 1) {
-        sbi.debug_console.writeByte('A') catch {};
+        std.debug.print("A", .{});
         scheduler.yield();
         delay();
         if (counter == 20) scheduler.exit();
@@ -121,7 +143,7 @@ fn procAEntry() void {
 fn procBEntry() void {
     log.debug("starting process B", .{});
     while (true) {
-        sbi.debug_console.writeByte('B') catch {};
+        std.debug.print("B", .{});
         scheduler.yield();
         delay();
     }

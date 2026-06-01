@@ -181,7 +181,7 @@ fn BlockTree(max_order: Order.Int) type {
             var buf: [0]u8 = undefined;
             var fba: std.heap.FixedBufferAllocator = .init(&buf);
             const self: Self = try .init(fba.allocator(), 0);
-            try expectEqual(@as(usize, 0), self.inner[0].capacity());
+            try std.testing.expectEqual(0, self.inner[0].capacity());
         }
 
         test "init() should make specified number of pages available" {
@@ -190,10 +190,10 @@ fn BlockTree(max_order: Order.Int) type {
             var self: Self = undefined;
 
             self = try init(fba.allocator(), 7);
-            try expectEqual(@as(usize, 7), self.inner[0].count(.available));
+            try std.testing.expectEqual(7, self.inner[0].count(.available));
             fba.reset();
             self = try init(fba.allocator(), 1025);
-            try expectEqual(@as(usize, 1025), self.inner[0].count(.available));
+            try std.testing.expectEqual(1025, self.inner[0].count(.available));
             fba.reset();
             try std.testing.expect(error.OutOfMemory == init(fba.allocator(), 8 * 1024));
         }
@@ -261,18 +261,18 @@ test BlockTree {
     var fba: std.heap.FixedBufferAllocator = .init(&buf);
     var tree: BlockTree(4) = try .init(fba.allocator(), 8);
     // ........
-    try expectEqual(@as(?usize, 0), tree.allocBlock(3));
+    try std.testing.expectEqual(0, tree.allocBlock(3));
     // ###=....
-    try expectEqual(@as(?usize, 4), tree.allocBlock(1));
+    try std.testing.expectEqual(4, tree.allocBlock(1));
     // ###=#...
-    try expectEqual(@as(?usize, 6), tree.allocBlock(2));
+    try std.testing.expectEqual(6, tree.allocBlock(2));
     // ###=#.##
     tree.freeBlock(4, 1);
     // ###=..##
-    try expectEqual(@as(?usize, null), tree.allocBlock(3));
+    try std.testing.expectEqual(null, tree.allocBlock(3));
     tree.freeBlock(0, 3);
     // ......##
-    try expectEqual(@as(?usize, 0), tree.allocBlock(4));
+    try std.testing.expectEqual(0, tree.allocBlock(4));
     // ####..##
 }
 
@@ -380,18 +380,10 @@ const Blocks = struct {
         var buf: [10]u8 = undefined;
         var fba: std.heap.FixedBufferAllocator = .init(&buf);
         var blocks: Blocks = try .init(fba.allocator(), 16);
-        try expectEqual(Range.init(2, 3), blocks.parentRange(.used, Range.init(4, 6).?));
+        try std.testing.expectEqual(Range.init(2, 3), blocks.parentRange(.used, Range.init(4, 6).?));
         blocks.markAs(.used, Range.init(3, 11).?);
-        try expectEqual(Range.init(1, 6), blocks.parentRange(.used, Range.init(3, 11).?));
+        try std.testing.expectEqual(Range.init(1, 6), blocks.parentRange(.used, Range.init(3, 11).?));
         blocks.markAs(.available, Range.init(5, 9).?);
-        try expectEqual(Range.init(3, 4), blocks.parentRange(.available, Range.init(5, 9).?));
+        try std.testing.expectEqual(Range.init(3, 4), blocks.parentRange(.available, Range.init(5, 9).?));
     }
 };
-
-fn expectEqual(expected: anytype, actual: @TypeOf(expected)) !void {
-    if (!std.meta.eql(expected, actual)) {
-        log.err("expected: {any}", .{expected});
-        log.err("  actual: {any}", .{actual});
-        return std.testing.expect(false);
-    }
-}
