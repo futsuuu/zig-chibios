@@ -16,8 +16,10 @@ driver_event: *align(4) volatile EventSuppression,
 
 pub fn init(a: std.mem.Allocator, index: u16, size: usize) std.mem.Allocator.Error!Queue {
     const desc = try a.alignedAlloc(Descriptor, .@"16", size);
+    errdefer a.free(desc);
     @memset(desc, .init);
     const supp = try a.alignedAlloc(EventSuppression, .@"4", 2);
+    errdefer a.free(supp);
     @memset(supp, .init);
     return .{
         .index = index,
@@ -45,7 +47,7 @@ pub fn append(
     flags: Descriptor.Flags,
 ) *volatile Descriptor {
     const desc = &self.desc_ring[self.index_counter];
-    desc.addr = .fromNative(@intCast(@intFromPtr(bytes.ptr)));
+    desc.addr = .fromNative(@intFromPtr(bytes.ptr));
     desc.len = .fromNative(@intCast(bytes.len));
     desc.flags = .fromNative(flags.merge(.{ .write = permission == .writable }));
     self.index_counter += 1;

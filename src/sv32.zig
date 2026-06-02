@@ -69,7 +69,7 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
             return .{ .entries = entries[0..entry_count] };
         }
 
-        pub fn deinit(self: *Self, allocator: Allocator) void {
+        pub fn deinit(self: Self, allocator: Allocator) void {
             allocator.free(@as([]Entry, self.entries));
         }
 

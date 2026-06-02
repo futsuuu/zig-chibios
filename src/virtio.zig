@@ -46,11 +46,11 @@ pub fn request(
 pub fn init(a: std.mem.Allocator) !?struct { Queue, *mmio.Register(block.Config, block.Feature) } {
     errdefer log.err("initialization failed", .{});
     const qemu = @import("qemu.zig");
-    const reg_header = try mmio.RegisterHeader.init(qemu.virt_virtio.base);
+    const reg_header: *const mmio.RegisterHeader = try .init(qemu.virt_virtio.base);
     switch (reg_header.device_id.read()) {
         .reserved => return null,
         .block => {
-            const register = mmio.Register(block.Config, block.Feature).init(reg_header);
+            const register: *mmio.Register(block.Config, block.Feature) = .init(reg_header);
             register.status.write(.reset);
             register.status.writeBit(.{ .acknowledge = true });
             errdefer register.status.writeBit(.{ .failed = true });
@@ -76,7 +76,7 @@ pub fn init(a: std.mem.Allocator) !?struct { Queue, *mmio.Register(block.Config,
             const queue = b: {
                 const queue_register = try register.selectQueue(0);
                 defer queue_register.ready.write(1);
-                const queue = try Queue.init(a, 0, queue_register.size_max.read());
+                const queue: Queue = try .init(a, 0, queue_register.size_max.read());
                 queue_register.size.write(@intCast(queue.desc_ring.len));
                 queue_register.setAddr(.desc, queue.getAddr(.desc));
                 queue_register.setAddr(.driver, queue.getAddr(.driver));

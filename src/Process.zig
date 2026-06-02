@@ -23,6 +23,7 @@ const uninit: Process = .{
 
 fn init(allocator: Allocator, pc: usize, stack_size: usize) Allocator.Error!Process {
     const stack = try allocator.alignedAlloc(u8, .of(usize), stack_size);
+    errdefer allocator.free(stack);
     var self: Process = .{
         .state = .runnable,
         .page_table = try .init(allocator),
@@ -31,8 +32,9 @@ fn init(allocator: Allocator, pc: usize, stack_size: usize) Allocator.Error!Proc
     };
     const kernel_page = @extern(*align(sv32.page_size) u8, .{ .name = "__kernel_page" });
     const kernel_page_end = @extern(*align(sv32.page_size) u8, .{ .name = "__kernel_page_end" });
-    var ppn = sv32.PhysAddr.PageNumber.fromPtr(kernel_page);
-    while (ppn.num < sv32.PhysAddr.PageNumber.fromPtr(kernel_page_end).num) : (ppn.num += 1) {
+    var ppn: sv32.PhysAddr.PageNumber = .fromPtr(kernel_page);
+    const ppn_end: sv32.PhysAddr.PageNumber = .fromPtr(kernel_page_end);
+    while (ppn.num < ppn_end.num) : (ppn.num += 1) {
         try self.page_table.mapPage(allocator, @intFromPtr(ppn.toPtr()), .init(ppn, .rwx));
     }
     return self;
@@ -119,18 +121,7 @@ pub const Context = struct {
 
     const Registers = extern struct {
         ra: usize,
-        s0: usize = 0,
-        s1: usize = 0,
-        s2: usize = 0,
-        s3: usize = 0,
-        s4: usize = 0,
-        s5: usize = 0,
-        s6: usize = 0,
-        s7: usize = 0,
-        s8: usize = 0,
-        s9: usize = 0,
-        s10: usize = 0,
-        s11: usize = 0,
+        s: [12]usize = @splat(0),
     };
 
     fn init(stack: []align(@alignOf(usize)) u8, return_address: usize) Context {
@@ -143,6 +134,7 @@ pub const Context = struct {
             .stack_ptr = reg,
         };
     }
+
     test "Context.init" {
         var stack: [1024]u8 align(@alignOf(usize)) = undefined;
         _ = Context.init(&stack, 7);
@@ -185,6 +177,7 @@ pub const Context = struct {
               [func] "r" (&swtch),
             : .{ .x1 = true }); // ra
     }
+
     fn swtch(
         // prev: *sp,
         // next: *const sp,
@@ -225,6 +218,7 @@ pub const Context = struct {
             \\ ret
             ::: .{ .memory = true });
     }
+
     test "switch context multiple times" {
         const mod = struct {
             var cx_a: Context = undefined;
