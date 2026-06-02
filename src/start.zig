@@ -16,17 +16,20 @@ export fn _start() linksection(".text.boot") callconv(.naked) noreturn {
     );
 }
 
-export fn kernelMain() callconv(.c) noreturn {
+/// https://docs.kernel.org/arch/riscv/boot.html
+export fn kernelMain(hartid: usize, devicetree_addr: usize) callconv(.c) noreturn {
     @memset(bss[0 .. bss_end - bss], 0);
     trap.initHandler();
     trap.saveCurrentKernelStack(stack_top);
-    switch (@typeInfo(@TypeOf(root.main)).@"fn".return_type.?) {
-        void, noreturn => {
-            root.main();
-        },
-        else => |ReturnType| {
-            std.debug.assert(@typeInfo(ReturnType) == .error_union);
-            root.main() catch |e| {
+    const res = if (0 < @typeInfo(@TypeOf(root.main)).@"fn".params.len)
+        root.main(hartid, devicetree_addr)
+    else
+        root.main();
+    switch (@TypeOf(res)) {
+        void => {},
+        else => |Result| {
+            std.debug.assert(@typeInfo(Result) == .error_union);
+            res catch |e| {
                 std.debug.panic("root.main() returns {}", .{e});
             };
         },

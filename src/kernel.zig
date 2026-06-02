@@ -2,6 +2,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.kernel);
 
+pub const Fdt = @import("Fdt.zig");
 pub const Process = @import("Process.zig");
 pub const buddy_allocator = @import("buddy_allocator.zig");
 pub const sbi = @import("sbi.zig");
@@ -101,9 +102,12 @@ pub fn printPanicInfo(msg: []const u8, first_trace_addr: ?usize) void {
 
 var scheduler: Process.Scheduler = undefined;
 
-pub fn main() !void {
+pub fn main(hartid: usize, devicetree_addr: usize) !void {
+    _ = hartid;
     defer log.info("exit", .{});
     std.debug.print("\n", .{});
+    const fdt: Fdt = try .init(devicetree_addr);
+    _ = fdt;
 
     try os.heap.initPageAllocator();
 
