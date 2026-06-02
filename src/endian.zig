@@ -8,10 +8,9 @@ pub fn Little(T: type) type {
 }
 
 fn Converter(T: type, endian: std.builtin.Endian) type {
-    return packed struct {
+    const Int = @Int(.unsigned, @bitSizeOf(T));
+    return packed struct(Int) {
         int: Int,
-
-        const Int = @Int(.unsigned, @bitSizeOf(T));
 
         pub inline fn fromNative(x: T) @This() {
             const native: Int = switch (@typeInfo(T)) {
