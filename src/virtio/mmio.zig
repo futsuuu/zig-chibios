@@ -31,69 +31,66 @@ pub const RegisterHeader = struct {
     }
 };
 
-pub fn Register(Config: type, Feature: type) type {
-    return struct {
-        const Self = @This();
-        comptime {
-            assert(@sizeOf(Self) == 0);
-        }
+pub const Register = struct {
+    comptime {
+        assert(@sizeOf(Register) == 0);
+    }
 
-        magic: RegisterField(0x00, .r, u32),
-        version: RegisterField(0x04, .r, u32),
-        device_id: RegisterField(0x08, .r, virtio.DeviceType),
-        vendor_id: RegisterField(0x0c, .r, u32),
-        device_features: RegisterField(0x10, .r, u32),
-        device_features_sel: RegisterField(0x14, .w, u32),
-        driver_features: RegisterField(0x20, .w, u32),
-        driver_features_sel: RegisterField(0x24, .w, u32),
-        queue_sel: RegisterField(0x30, .w, u32),
-        queue_notify: RegisterField(0x50, .w, QueueNotifier),
-        interrupt_status: RegisterField(0x60, .r, u32),
-        interrupt_ack: RegisterField(0x64, .w, u32),
-        status: RegisterField(0x70, .rw, virtio.DeviceStatus),
+    magic: RegisterField(0x00, .r, u32),
+    version: RegisterField(0x04, .r, u32),
+    device_id: RegisterField(0x08, .r, virtio.DeviceType),
+    vendor_id: RegisterField(0x0c, .r, u32),
+    device_features: RegisterField(0x10, .r, u32),
+    device_features_sel: RegisterField(0x14, .w, u32),
+    driver_features: RegisterField(0x20, .w, u32),
+    driver_features_sel: RegisterField(0x24, .w, u32),
+    queue_sel: RegisterField(0x30, .w, u32),
+    queue_notify: RegisterField(0x50, .w, QueueNotifier),
+    interrupt_status: RegisterField(0x60, .r, u32),
+    interrupt_ack: RegisterField(0x64, .w, u32),
+    status: RegisterField(0x70, .rw, virtio.DeviceStatus),
 
-        pub fn init(header: *const RegisterHeader) *Self {
-            if (header.device_id.read() == .reserved) {
-                std.debug.panic("device with DeviceID 0x0 should be ignored", .{});
-            }
-            return @ptrCast(@constCast(header));
+    pub fn init(header: *const RegisterHeader) *Register {
+        if (header.device_id.read() == .reserved) {
+            std.debug.panic("device with DeviceID 0x0 should be ignored", .{});
         }
+        return @ptrCast(@constCast(header));
+    }
 
-        pub fn config(self: *Self) *Config {
-            return @ptrFromInt(@intFromPtr(self) + 0x100);
-        }
+    pub fn config(self: *Register, Config: type) *Config {
+        return @ptrFromInt(@intFromPtr(self) + 0x100);
+    }
 
-        pub fn readDeviceFeatures(self: *Self) virtio.feature.Set(Feature) {
-            var set: virtio.feature.Set(Feature) = .uninit;
-            for (0..set.array.len) |i| {
-                self.device_features_sel.write(@intCast(i));
-                set.array[i] = self.device_features.read();
-            }
-            return set;
+    pub fn readDeviceFeatures(self: *Register, Feature: type) virtio.feature.Set(Feature) {
+        var set: virtio.feature.Set(Feature) = .uninit;
+        for (0..set.array.len) |i| {
+            self.device_features_sel.write(@intCast(i));
+            set.array[i] = self.device_features.read();
         }
+        return set;
+    }
 
-        pub fn writeDriverFeatures(self: *Self, set: virtio.feature.Set(Feature)) void {
-            for (0..set.array.len) |i| {
-                self.driver_features_sel.write(@intCast(i));
-                self.driver_features.write(set.array[i]);
-            }
+    pub fn writeDriverFeatures(self: *Register, Feature: type, set: virtio.feature.Set(Feature)) void {
+        for (0..set.array.len) |i| {
+            self.driver_features_sel.write(@intCast(i));
+            self.driver_features.write(set.array[i]);
         }
+    }
 
-        pub fn selectQueue(self: *Self, index: u16) error{QueueNotAvailable}!*SelectedQueueRegister {
-            self.queue_sel.write(@intCast(index));
-            const selected: *SelectedQueueRegister = @ptrCast(self);
-            if (selected.ready.read() != 0) {
-                log.err("virtqueue is already in use", .{});
-                return error.QueueNotAvailable;
-            }
-            if (selected.size_max.read() == 0) {
-                log.err("QueueSizeMax is zero", .{});
-                return error.QueueNotAvailable;
-            }
-            return selected;
+    pub fn selectQueue(self: *Register, index: u16) error{QueueNotAvailable}!*SelectedQueueRegister {
+        self.queue_sel.write(@intCast(index));
+        const selected: *SelectedQueueRegister = @ptrCast(self);
+        if (selected.ready.read() != 0) {
+            log.err("virtqueue is already in use", .{});
+            return error.QueueNotAvailable;
         }
-    };
-}
+        if (selected.size_max.read() == 0) {
+            log.err("QueueSizeMax is zero", .{});
+            return error.QueueNotAvailable;
+        }
+        return selected;
+    }
+};
 
 pub const SelectedQueueRegister = struct {
     size_max: RegisterField(0x34, .r, u32),

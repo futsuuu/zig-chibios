@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const endian = @import("../endian.zig");
-const Le = endian.Little;
+const Le = @import("../endian.zig").Little;
+const virtio = @import("../virtio.zig");
 
 const Queue = @This();
 
@@ -14,7 +14,14 @@ device_event: *align(4) const volatile EventSuppression,
 /// Write-only
 driver_event: *align(4) volatile EventSuppression,
 
-pub fn init(a: std.mem.Allocator, index: u16, size: usize) std.mem.Allocator.Error!Queue {
+register: *virtio.mmio.Register,
+
+pub fn init(
+    a: std.mem.Allocator,
+    index: u16,
+    size: usize,
+    register: *virtio.mmio.Register,
+) std.mem.Allocator.Error!Queue {
     const desc = try a.alignedAlloc(Descriptor, .@"16", size);
     errdefer a.free(desc);
     @memset(desc, .init);
@@ -26,6 +33,7 @@ pub fn init(a: std.mem.Allocator, index: u16, size: usize) std.mem.Allocator.Err
         .desc_ring = desc,
         .device_event = &supp[0],
         .driver_event = &supp[1],
+        .register = register,
     };
 }
 

@@ -8,7 +8,6 @@ pub const mmio = @import("virtio/mmio.zig");
 
 pub fn request(
     virtq: *Queue,
-    register: *mmio.Register(block.Config, block.Feature),
     comptime t: enum { read, write },
     buf: switch (t) {
         .read => []u8,
@@ -35,7 +34,7 @@ pub fn request(
 
     asm volatile ("fence rw, rw" ::: .{ .memory = true });
     if (virtq.device_event.getEnabled()) |_| {
-        register.queue_notify.write(.{ .vq_index = virtq.index, .data = undefined });
+        virtq.register.queue_notify.write(.{ .vq_index = virtq.index, .data = undefined });
     }
     while (!virtq.isUsed(header_desc)) {
         std.atomic.spinLoopHint();
@@ -43,20 +42,20 @@ pub fn request(
     return status.ensureOk();
 }
 
-pub fn init(a: std.mem.Allocator, address: usize) !?struct { Queue, *mmio.Register(block.Config, block.Feature) } {
+pub fn init(a: std.mem.Allocator, address: usize) !?Queue {
     errdefer log.err("initialization failed", .{});
     const reg_header: *const mmio.RegisterHeader = try .init(address);
     switch (reg_header.device_id.read()) {
         .reserved => return null,
         .block => {
-            const register: *mmio.Register(block.Config, block.Feature) = .init(reg_header);
+            const register: *mmio.Register = .init(reg_header);
             register.status.write(.reset);
             register.status.writeBit(.{ .acknowledge = true });
             errdefer register.status.writeBit(.{ .failed = true });
 
             register.status.writeBit(.{ .driver = true });
 
-            var features = register.readDeviceFeatures();
+            var features = register.readDeviceFeatures(block.Feature);
             log.debug("device features: {f}", .{features});
             try features.require(.{ .reserved = .version_1 });
             try features.require(.{ .reserved = .ring_packed });
@@ -64,7 +63,7 @@ pub fn init(a: std.mem.Allocator, address: usize) !?struct { Queue, *mmio.Regist
             features.unset(.{ .reserved = .notification_config_data });
             features.unset(.{ .device = .flush });
             features.unset(.{ .device = .zoned });
-            register.writeDriverFeatures(features);
+            register.writeDriverFeatures(block.Feature, features);
             log.debug("driver features: {f}", .{features});
             register.status.writeBit(.{ .features_ok = true });
             if (!register.status.read().features_ok) {
@@ -75,7 +74,7 @@ pub fn init(a: std.mem.Allocator, address: usize) !?struct { Queue, *mmio.Regist
             const queue = b: {
                 const queue_register = try register.selectQueue(0);
                 defer queue_register.ready.write(1);
-                const queue: Queue = try .init(a, 0, queue_register.size_max.read());
+                const queue: Queue = try .init(a, 0, queue_register.size_max.read(), register);
                 queue_register.size.write(@intCast(queue.desc_ring.len));
                 queue_register.setAddr(.desc, queue.getAddr(.desc));
                 queue_register.setAddr(.driver, queue.getAddr(.driver));
@@ -85,7 +84,7 @@ pub fn init(a: std.mem.Allocator, address: usize) !?struct { Queue, *mmio.Regist
 
             register.status.writeBit(.{ .driver_ok = true });
 
-            return .{ queue, register };
+            return queue;
         },
         else => |ty| {
             log.err("unimplemented device type: {}", .{ty});
