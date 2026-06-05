@@ -5,6 +5,7 @@ const log = std.log.scoped(.kernel);
 pub const Fdt = @import("Fdt.zig");
 pub const Process = @import("Process.zig");
 pub const buddy_allocator = @import("buddy_allocator.zig");
+const qemu = @import("qemu.zig");
 pub const sbi = @import("sbi.zig");
 pub const sv32 = @import("sv32.zig");
 pub const trap = @import("trap.zig");
@@ -114,7 +115,7 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
 
     try os.heap.initPageAllocator();
 
-    var virtq, const register = try virtio.init(std.heap.page_allocator) orelse {
+    var virtq, const register = try virtio.init(std.heap.page_allocator, qemu.virt_virtio.base) orelse {
         log.warn("virtio device not found", .{});
         return;
     };
