@@ -90,7 +90,7 @@ pub fn init(a: std.mem.Allocator, address: usize) !?struct { Queue, *mmio.Regist
         else => |ty| {
             log.err("unimplemented device type: {}", .{ty});
             return null;
-        }
+        },
     }
 }
 

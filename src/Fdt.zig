@@ -99,7 +99,7 @@ pub const Node = struct {
                 log.warn("{s}: invalid compatible property: {any}", .{ self.name, p.value });
                 return;
             }
-            self.compatible = p.value[0..p.value.len - 1];
+            self.compatible = p.value[0 .. p.value.len - 1];
         } else if (std.mem.eql(u8, p.name, "reg")) {
             const parent_address_cells = self.parent_address_cells orelse {
                 log.warn("{s}: reg property exists but #address-cells property does not exist in the parent node", .{self.name});
