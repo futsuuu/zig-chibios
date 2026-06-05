@@ -133,7 +133,7 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
 
 fn delay() void {
     for (0..30000000) |_| {
-        asm volatile ("nop");
+        std.atomic.spinLoopHint();
     }
 }
 

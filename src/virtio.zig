@@ -38,7 +38,7 @@ pub fn request(
         register.queue_notify.write(.{ .vq_index = virtq.index, .data = undefined });
     }
     while (!virtq.isUsed(header_desc)) {
-        asm volatile ("nop");
+        std.atomic.spinLoopHint();
     }
     return status.ensureOk();
 }
