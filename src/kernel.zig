@@ -107,7 +107,10 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
     defer log.info("exit", .{});
     std.debug.print("\n", .{});
     const fdt: Fdt = try .init(devicetree_addr);
-    _ = fdt;
+    var fdt_nodes = try fdt.nodes();
+    while (try fdt_nodes.next()) |fdt_node| {
+        log.debug("{f}", .{fdt_node});
+    }
 
     try os.heap.initPageAllocator();
 

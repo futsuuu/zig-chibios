@@ -14,7 +14,7 @@ const supported_version: u32 = 17;
 
 pub fn init(base_addr: usize) !Fdt {
     const header: *const Header = try .fromAddr(base_addr);
-    const self: Fdt = .{
+    return .{
         .header = header,
         .reserved_memories = b: {
             const ptr = header.memoryReservationBlock();
@@ -26,12 +26,197 @@ pub fn init(base_addr: usize) !Fdt {
         .structure_block = header.structureBlock(),
         .strings_block = header.stringsBlock(),
     };
-    var r: std.Io.Reader = .fixed(self.structure_block);
-    while (try TokenWithData.read(&r, self.strings_block)) |t| {
-        log.debug("token: {f}", .{t});
-    }
-    return self;
 }
+
+pub inline fn nodes(self: Fdt) !ManagedNodeIterator {
+    return .init(self.structure_block, self.strings_block);
+}
+
+const ManagedNodeIterator = struct {
+    stack_buf: [32]Node,
+    iterator: NodeIterator,
+
+    inline fn init(structure_block: []const u8, strings_block: []const u8) !ManagedNodeIterator {
+        var self: ManagedNodeIterator = undefined;
+        self.iterator = try .init(structure_block, strings_block, &self.stack_buf);
+        return self;
+    }
+
+    pub inline fn next(self: *ManagedNodeIterator) !?Node {
+        return self.iterator.next();
+    }
+};
+
+pub const Node = struct {
+    name: []const u8,
+    parent_address_cells: ?u32,
+    parent_size_cells: ?u32,
+
+    address_cells: ?u32 = null,
+    size_cells: ?u32 = null,
+    /// null-delimited string list
+    compatible: ?[]const u8 = null,
+    /// Big endian
+    reg: ?[]const u32 = null,
+
+    pub fn compatibles(self: Node) ?std.mem.SplitIterator(u8, .scalar) {
+        const s = self.compatible orelse return null;
+        return std.mem.splitScalar(u8, s, std.ascii.control_code.nul);
+    }
+
+    fn setProperty(self: *Node, p: Property) void {
+        if (std.mem.eql(u8, p.name, "#address-cells")) {
+            if (p.value.len != 4) {
+                log.warn("{s}: invalid #address-cells property: {any}", .{ self.name, p.value });
+                return;
+            }
+            self.address_cells = std.mem.readInt(u32, p.value[0..@sizeOf(u32)], .big);
+        } else if (std.mem.eql(u8, p.name, "#size-cells")) {
+            if (p.value.len != 4) {
+                log.warn("{s}: invalid #size-cells property: {any}", .{ self.name, p.value });
+                return;
+            }
+            self.size_cells = std.mem.readInt(u32, p.value[0..@sizeOf(u32)], .big);
+        } else if (std.mem.eql(u8, p.name, "compatible")) {
+            if (p.value.len == 0 or p.value[p.value.len - 1] != std.ascii.control_code.nul) {
+                log.warn("{s}: invalid compatible property: {any}", .{ self.name, p.value });
+                return;
+            }
+            self.compatible = p.value[0..p.value.len - 1];
+        } else if (std.mem.eql(u8, p.name, "reg")) {
+            const parent_address_cells = self.parent_address_cells orelse {
+                log.warn("{s}: reg property exists but #address-cells property does not exist in the parent node", .{self.name});
+                return;
+            };
+            const parent_size_cells = self.parent_size_cells orelse {
+                log.warn("{s}: reg property exists but #size-cells property does not exist in the parent node", .{self.name});
+                return;
+            };
+            if (p.value.len % ((parent_address_cells + parent_size_cells) * @sizeOf(u32)) != 0) {
+                log.warn("{s}: invalid reg property: {any}", .{ self.name, p.value });
+                return;
+            }
+            self.reg = @ptrCast(p.value);
+        }
+    }
+
+    pub fn format(self: Node, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        try writer.print("/{s} {{ ", .{self.name});
+        if (self.address_cells) |n| {
+            try writer.print("#address-cells = <{}>; ", .{n});
+        }
+        if (self.size_cells) |n| {
+            try writer.print("#size-cells = <{}>; ", .{n});
+        }
+        if (self.compatibles()) |iter| {
+            try writer.print("compatible = ", .{});
+            var it = iter;
+            var i: usize = 0;
+            while (it.next()) |arch| : (i += 1) {
+                if (0 < i) try writer.print(", ", .{});
+                try writer.print("\"{s}\"", .{arch});
+            }
+            try writer.print("; ", .{});
+        }
+        if (self.reg) |reg| {
+            try writer.print("reg = <", .{});
+            for (reg, 0..) |n, i| {
+                if (1 < reg.len and 0 < i) try writer.writeByte(' ');
+                try writer.print("0x{X}", .{std.mem.bigToNative(u32, n)});
+            }
+            try writer.writeAll(">; ");
+        }
+        try writer.print("}}", .{});
+    }
+};
+
+pub const NodeIterator = struct {
+    structure_block: std.Io.Reader,
+    strings_block: []const u8,
+    stack: std.ArrayList(Node),
+
+    fn init(structure_block: []const u8, strings_block: []const u8, stack_buf: []Node) !NodeIterator {
+        var self: NodeIterator = .{
+            .structure_block = .fixed(structure_block),
+            .strings_block = strings_block,
+            .stack = .initBuffer(stack_buf),
+        };
+        const first = try TokenWithData.read(&self.structure_block, self.strings_block) orelse {
+            log.err("root node not found", .{});
+            return error.InvalidFormat;
+        };
+        switch (first) {
+            .begin_node => |name| {
+                if (0 < name.len) {
+                    log.warn("name of the root node is not empty: {any}", .{name});
+                }
+                try self.stack.appendBounded(.{
+                    .name = name,
+                    .parent_address_cells = null,
+                    .parent_size_cells = null,
+                });
+            },
+            else => return error.InvalidFormat,
+        }
+        return self;
+    }
+
+    pub fn next(self: *NodeIterator) !?Node {
+        var property_dest = self.stack.pop() orelse return null;
+        sw: switch (try TokenWithData.read(&self.structure_block, self.strings_block) orelse {
+            log.err("FDT_END after the node name \"{s}\"", .{property_dest.name});
+            return error.InvalidFormat;
+        }) {
+            .begin_node => |name| {
+                self.stack.appendAssumeCapacity(property_dest);
+                try self.stack.appendBounded(.{
+                    .name = name,
+                    .parent_address_cells = property_dest.address_cells,
+                    .parent_size_cells = property_dest.size_cells,
+                });
+                return property_dest;
+            },
+            .property => |property| {
+                property_dest.setProperty(property);
+                continue :sw try TokenWithData.read(&self.structure_block, self.strings_block) orelse {
+                    log.err("FDT_END after the property value", .{});
+                    return error.InvalidFormat;
+                };
+            },
+            .end_node => switch (try TokenWithData.read(&self.structure_block, self.strings_block) orelse {
+                if (0 < self.stack.items.len) {
+                    log.err("missing FDT_END_NODE", .{});
+                    return error.InvalidFormat;
+                }
+                return null;
+            }) {
+                .begin_node => |name| {
+                    const parent = self.stack.getLastOrNull() orelse {
+                        log.err("parent node not found", .{});
+                        return error.InvalidFormat;
+                    };
+                    try self.stack.appendBounded(.{
+                        .name = name,
+                        .parent_address_cells = parent.address_cells,
+                        .parent_size_cells = parent.size_cells,
+                    });
+                    return property_dest;
+                },
+                .property => {
+                    log.err("FDT_PROP after FDT_END_NODE", .{});
+                    return error.InvalidFormat;
+                },
+                .end_node => {
+                    if (self.stack.pop() == null) {
+                        log.err("too many FDT_END_NODE", .{});
+                        return error.InvalidFormat;
+                    }
+                    continue :sw .end_node;
+                },
+            },
+        }
+    }
+};
 
 const TokenWithData = union(enum) {
     begin_node: []const u8,
@@ -89,29 +274,6 @@ const Property = struct {
             .name = strings_block[name_start..name_end],
             .value = @alignCast(try structure_block.take(len)),
         };
-    }
-
-    pub fn format(self: Property, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        if (self.value.len == 0) {
-            try writer.print("  {s};", .{self.name});
-            return;
-        }
-        try writer.print("  {s} = ", .{self.name});
-        if (self.name[0] == '#') {
-            try writer.print("<{}>;", .{std.mem.bigToNative(u32, @bitCast(self.value[0..4].*))});
-        } else if (std.mem.eql(u8, self.name, "compatible")) {
-            try writer.print("\"{s}\";", .{self.value});
-        } else if (std.mem.eql(u8, self.name, "reg") and self.value.len % 4 == 0) {
-            try writer.writeByte('<');
-            const casted: []const u32 = @ptrCast(self.value);
-            for (casted, 0..) |n, i| {
-                if (1 < casted.len and 0 < i) try writer.writeByte(' ');
-                try writer.print("0x{X}", .{std.mem.bigToNative(u32, n)});
-            }
-            try writer.writeAll(">;");
-        } else {
-            try writer.print("{any};", .{self.value});
-        }
     }
 };
 
