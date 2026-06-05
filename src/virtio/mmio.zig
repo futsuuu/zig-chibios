@@ -3,9 +3,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.virtio_mmio);
 
-const endian = @import("../endian.zig");
-const Le = endian.Little;
-const qemu = @import("../qemu.zig");
+const Le = @import("../endian.zig").Little;
 const virtio = @import("../virtio.zig");
 
 pub const RegisterHeader = struct {
@@ -30,10 +28,6 @@ pub const RegisterHeader = struct {
             return error.InvalidDevice;
         }
         return self;
-    }
-    test init {
-        const header = try init(qemu.virt_virtio.base);
-        try std.testing.expect(header.device_id.read() == .block);
     }
 };
 

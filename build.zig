@@ -52,7 +52,7 @@ pub fn build(b: *std.Build) void {
         "-drive",
         "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
         "-device",
-        "virtio-blk-device,bus=virtio-mmio-bus.0,drive=drive0,packed=true",
+        "virtio-blk-device,drive=drive0,packed=true",
         "-kernel",
     });
     run_cmd.addArtifactArg(kernel);
@@ -113,7 +113,7 @@ pub fn build(b: *std.Build) void {
             "-drive",
             "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
             "-device",
-            "virtio-blk-device,bus=virtio-mmio-bus.0,drive=drive0,packed=true",
+            "virtio-blk-device,drive=drive0,packed=true",
             "-kernel",
             null,
         });

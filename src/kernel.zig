@@ -5,7 +5,6 @@ const log = std.log.scoped(.kernel);
 pub const Fdt = @import("Fdt.zig");
 pub const Process = @import("Process.zig");
 pub const buddy_allocator = @import("buddy_allocator.zig");
-const qemu = @import("qemu.zig");
 pub const sbi = @import("sbi.zig");
 pub const sv32 = @import("sv32.zig");
 pub const trap = @import("trap.zig");
@@ -107,23 +106,30 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
     _ = hartid;
     defer log.info("exit", .{});
     std.debug.print("\n", .{});
-    const fdt: Fdt = try .init(devicetree_addr);
-    var fdt_nodes = try fdt.nodes();
-    while (try fdt_nodes.next()) |fdt_node| {
-        log.debug("{f}", .{fdt_node});
-    }
 
     try os.heap.initPageAllocator();
 
-    var virtq, const register = try virtio.init(std.heap.page_allocator, qemu.virt_virtio.base) orelse {
-        log.warn("virtio device not found", .{});
-        return;
-    };
-
-    var buf = std.mem.zeroes([512]u8);
-    try virtio.request(&virtq, register, .read, &buf, 0);
-    @memcpy(buf[0..].ptr, "hello world!");
-    try virtio.request(&virtq, register, .write, &buf, 0);
+    const fdt: Fdt = try .init(devicetree_addr);
+    var fdt_nodes = try fdt.nodes();
+    while (try fdt_nodes.next()) |fdt_node| {
+        if (!fdt_node.isCompatibleWith("virtio,mmio")) {
+            continue;
+        }
+        var registers = fdt_node.registers() orelse {
+            log.warn("{s} does not have a reg property", .{fdt_node.name});
+            continue;
+        };
+        const address: usize = @truncate(registers.next().?.address());
+        var virtq, const register = try virtio.init(std.heap.page_allocator, address) orelse {
+            log.info("skip initialization of device {s}", .{fdt_node.name});
+            continue;
+        };
+        log.info("writing message in {s}", .{fdt_node.name});
+        var buf = std.mem.zeroes([512]u8);
+        try virtio.request(&virtq, register, .read, &buf, 0);
+        @memcpy(buf[0..].ptr, "hello world!");
+        try virtio.request(&virtq, register, .write, &buf, 0);
+    }
 
     scheduler = try .init(std.heap.page_allocator);
     _ = try scheduler.spawn(&procAEntry, 8192);
