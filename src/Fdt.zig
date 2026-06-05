@@ -56,12 +56,29 @@ pub const Node = struct {
     size_cells: ?u32 = null,
     /// null-delimited string list
     compatible: ?[]const u8 = null,
-    /// Big endian
+    /// This field is not null only if parent_address_cells is greater than 0 and parent_size_cells is not null.
     reg: ?[]const u32 = null,
 
-    pub fn compatibles(self: Node) ?std.mem.SplitIterator(u8, .scalar) {
-        const s = self.compatible orelse return null;
-        return std.mem.splitScalar(u8, s, std.ascii.control_code.nul);
+    pub fn compatibles(self: Node) std.mem.SplitIterator(u8, .scalar) {
+        return std.mem.splitScalar(u8, self.compatible orelse "", std.ascii.control_code.nul);
+    }
+
+    pub fn isCompatibleWith(self: Node, target_arch: []const u8) bool {
+        if (self.compatible == null) return false;
+        var it = self.compatibles();
+        while (it.next()) |arch| if (std.mem.eql(u8, arch, target_arch)) {
+            return true;
+        };
+        return false;
+    }
+
+    pub fn registers(self: Node) ?RegisterIterator {
+        const cells = self.reg orelse return null;
+        return .{
+            .cells = cells,
+            .address_cells = self.parent_address_cells.?,
+            .size_cells = self.parent_size_cells.?,
+        };
     }
 
     fn setProperty(self: *Node, p: Property) void {
@@ -88,6 +105,10 @@ pub const Node = struct {
                 log.warn("{s}: reg property exists but #address-cells property does not exist in the parent node", .{self.name});
                 return;
             };
+            if (parent_address_cells == 0) {
+                log.warn("{s}: reg property exists but #address-cells property of the parent node is 0", .{self.name});
+                return;
+            }
             const parent_size_cells = self.parent_size_cells orelse {
                 log.warn("{s}: reg property exists but #size-cells property does not exist in the parent node", .{self.name});
                 return;
@@ -108,9 +129,9 @@ pub const Node = struct {
         if (self.size_cells) |n| {
             try writer.print("#size-cells = <{}>; ", .{n});
         }
-        if (self.compatibles()) |iter| {
+        if (self.compatible != null) {
             try writer.print("compatible = ", .{});
-            var it = iter;
+            var it = self.compatibles();
             var i: usize = 0;
             while (it.next()) |arch| : (i += 1) {
                 if (0 < i) try writer.print(", ", .{});
@@ -127,6 +148,42 @@ pub const Node = struct {
             try writer.writeAll(">; ");
         }
         try writer.print("}}", .{});
+    }
+};
+
+pub const RegisterIterator = struct {
+    cells: []const u32,
+    address_cells: u32,
+    size_cells: u32,
+    index: usize = 0,
+
+    /// The first call of this function must not be null.
+    pub fn next(self: *RegisterIterator) ?Register {
+        if (self.cells.len <= self.index) return null;
+        const len = self.address_cells + self.size_cells;
+        defer self.index += len;
+        const cells = self.cells[self.index..][0..len];
+        return .{
+            .address_cells = cells[0..self.address_cells],
+            .size_cells = cells[self.size_cells..],
+        };
+    }
+};
+
+pub const Register = struct {
+    address_cells: []const u32,
+    size_cells: []const u32,
+
+    pub fn address(self: Register) u64 {
+        const low = std.mem.bigToNative(u32, self.address_cells[self.address_cells.len - 1]);
+        switch (self.address_cells.len) {
+            0 => unreachable,
+            1 => return low,
+            else => {
+                const high: u64 = std.mem.bigToNative(u32, self.address_cells[self.address_cells.len - 2]);
+                return (high << 32) | low;
+            },
+        }
     }
 };
 
