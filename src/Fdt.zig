@@ -57,7 +57,7 @@ pub const Node = struct {
     /// null-delimited string list
     compatible: ?[]const u8 = null,
     /// This field is not null only if parent_address_cells is greater than 0 and parent_size_cells is not null.
-    reg: ?[]const u32 = null,
+    reg: ?[]const Be(u32) = null,
 
     pub fn compatibles(self: Node) std.mem.SplitIterator(u8, .scalar) {
         return std.mem.splitScalar(u8, self.compatible orelse "", std.ascii.control_code.nul);
@@ -143,7 +143,7 @@ pub const Node = struct {
             try writer.print("reg = <", .{});
             for (reg, 0..) |n, i| {
                 if (1 < reg.len and 0 < i) try writer.writeByte(' ');
-                try writer.print("0x{X}", .{std.mem.bigToNative(u32, n)});
+                try writer.print("0x{X}", .{n.toNative()});
             }
             try writer.writeAll(">; ");
         }
@@ -152,7 +152,7 @@ pub const Node = struct {
 };
 
 pub const RegisterIterator = struct {
-    cells: []const u32,
+    cells: []const Be(u32),
     address_cells: u32,
     size_cells: u32,
     index: usize = 0,
@@ -171,16 +171,16 @@ pub const RegisterIterator = struct {
 };
 
 pub const Register = struct {
-    address_cells: []const u32,
-    size_cells: []const u32,
+    address_cells: []const Be(u32),
+    size_cells: []const Be(u32),
 
     pub fn address(self: Register) u64 {
-        const low = std.mem.bigToNative(u32, self.address_cells[self.address_cells.len - 1]);
+        const low = self.address_cells[self.address_cells.len - 1].toNative();
         switch (self.address_cells.len) {
             0 => unreachable,
             1 => return low,
             else => {
-                const high: u64 = std.mem.bigToNative(u32, self.address_cells[self.address_cells.len - 2]);
+                const high: u64 = self.address_cells[self.address_cells.len - 2].toNative();
                 return (high << 32) | low;
             },
         }
