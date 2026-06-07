@@ -165,4 +165,5 @@ fn procBEntry() void {
 
 comptime {
     std.testing.refAllDecls(@This());
+    _ = @import("PagedBumpAllocator.zig");
 }
