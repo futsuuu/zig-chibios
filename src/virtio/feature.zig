@@ -1,6 +1,8 @@
 const std = @import("std");
 const log = std.log.scoped(.virtio);
 
+const virtio = @import("../virtio.zig");
+
 pub const Reserved = enum(u32) {
     indirect_descriptor = 28,
     event_index = 29,
@@ -52,12 +54,13 @@ pub fn Full(DeviceSpecific: type) type {
         }
     };
 }
+
 test Full {
-    try std.testing.expect(Full(enum(u32) { bar = 1 }).max_int == 41);
-    try std.testing.expect(Full(enum(u32) { foo = 1000 }).max_int == 1000);
+    try std.testing.expectEqual(41, Full(enum(u32) { bar = 1 }).max_int);
+    try std.testing.expectEqual(1000, Full(enum(u32) { foo = 1000 }).max_int);
     const f: Full(enum(u32) { bar = 7 }) = .{ .reserved = .version_1 };
-    try std.testing.expect(f.toInt() == 32);
-    try std.testing.expect(std.mem.eql(u8, f.name(), "version_1"));
+    try std.testing.expectEqual(32, f.toInt());
+    try std.testing.expectEqualStrings(f.name(), "version_1");
 }
 
 pub fn Set(DeviceSpecific: type) type {
@@ -85,10 +88,10 @@ pub fn Set(DeviceSpecific: type) type {
             self.array[index] &= ~(@as(u32, 1) << bit_index);
         }
 
-        pub fn require(self: Self, feature: Feature) error{FeatureNotOffered}!void {
+        pub fn require(self: Self, feature: Feature) virtio.InitError!void {
             if (!self.has(feature)) {
                 log.err("required feature '{s}' is not offered by device", .{feature.name()});
-                return error.FeatureNotOffered;
+                return error.UnsupportedDevice;
             }
         }
 
@@ -102,9 +105,10 @@ pub fn Set(DeviceSpecific: type) type {
         }
     };
 }
+
 test Set {
-    try std.testing.expect(Set(enum(u32) { x = 63 }).uninit.array.len == 2);
-    try std.testing.expect(Set(enum(u32) { x = 64 }).uninit.array.len == 3);
+    try std.testing.expectEqual(2, Set(enum(u32) { x = 63 }).uninit.array.len);
+    try std.testing.expectEqual(3, Set(enum(u32) { x = 64 }).uninit.array.len);
 
     var set: Set(enum(u32) { a = 0, b = 1, c = 2, d = 3, x = 63 }) = .uninit;
     set.array[0] = 0b00000000_00000000_00000000_00000111;

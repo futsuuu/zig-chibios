@@ -1,8 +1,97 @@
-const endian = @import("../endian.zig");
-const Le = endian.Little;
+const std = @import("std");
+const log = std.log.scoped(.virtio_blk);
+
+const Le = @import("../endian.zig").Little;
+const PagedBumpAllocator = @import("../PagedBumpAllocator.zig");
 const virtio = @import("../virtio.zig");
 
-pub const Config = packed struct {
+pub const Driver = struct {
+    bump: PagedBumpAllocator,
+    requestq1: virtio.Queue,
+    register: *virtio.mmio.Register,
+    features: virtio.feature.Set(Feature),
+
+    pub fn init(register_header: *const virtio.mmio.RegisterHeader) virtio.InitError!Driver {
+        const register: *virtio.mmio.Register = .init(register_header);
+        register.status.write(.reset);
+        register.status.writeBit(.{ .acknowledge = true });
+        errdefer register.status.writeBit(.{ .failed = true });
+        register.status.writeBit(.{ .driver = true });
+
+        var features = register.readDeviceFeatures(Feature);
+        log.debug("device features: {f}", .{features});
+        try features.require(.{ .reserved = .version_1 });
+        try features.require(.{ .reserved = .ring_packed });
+        features.unset(.{ .reserved = .notification_data });
+        features.unset(.{ .reserved = .notification_config_data });
+        features.unset(.{ .device = .flush });
+        features.unset(.{ .device = .zoned });
+        log.debug("driver features: {f}", .{features});
+        try register.writeDriverFeatures(Feature, features);
+
+        var bump: PagedBumpAllocator = .init;
+        errdefer bump.deinit();
+
+        const requestq1 = try virtio.Queue.init(bump.allocator(), 0, register) orelse {
+            log.err("requestq1 unavailable", .{});
+            return error.InvalidDevice;
+        };
+        register.status.writeBit(.{ .driver_ok = true });
+
+        return .{
+            .bump = bump,
+            .requestq1 = requestq1,
+            .register = register,
+            .features = features,
+        };
+    }
+
+    pub fn deinit(self: Driver) void {
+        defer self.bump.deinit();
+        self.register.status.write(.reset);
+        while (self.register.status.read() != virtio.DeviceStatus.reset) {
+            std.atomic.spinLoopHint();
+        }
+    }
+
+    pub fn request(
+        self: *Driver,
+        comptime t: enum { read, write },
+        buf: switch (t) {
+            .read => []u8,
+            .write => []const u8,
+        },
+        sector: u64,
+    ) RequestStatus.Error!void {
+        const header: RequestHeader = switch (t) {
+            .read => .init(.read, sector),
+            .write => .init(.write, sector),
+        };
+        var status: RequestStatus = undefined;
+        const header_desc = self.requestq1.append(.readonly, std.mem.asBytes(&header), .{ .next = true });
+        const body_desc = switch (t) {
+            .read => self.requestq1.append(.writable, buf, .{ .next = true }),
+            .write => self.requestq1.append(.readonly, buf, .{ .next = true }),
+        };
+        const status_desc = self.requestq1.append(.writable, std.mem.asBytes(&status), .{});
+        status_desc.id = .fromNative(1);
+        self.requestq1.markAsAvailable(body_desc);
+        self.requestq1.markAsAvailable(status_desc);
+        asm volatile ("fence rw, w" ::: .{ .memory = true });
+        self.requestq1.markAsAvailable(header_desc);
+
+        asm volatile ("fence rw, rw" ::: .{ .memory = true });
+        if (self.requestq1.device_event.getEnabled()) |_| {
+            self.requestq1.register.queue_notify.write(.{ .vq_index = self.requestq1.index, .data = undefined });
+        }
+        while (!self.requestq1.isUsed(header_desc)) {
+            std.atomic.spinLoopHint();
+        }
+        return status.ensureOk();
+    }
+};
+
+pub const Config = extern struct {
     capacity: Le(u64),
 };
 

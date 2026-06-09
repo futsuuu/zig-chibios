@@ -14,18 +14,18 @@ pub const RegisterHeader = struct {
     version: RegisterField(0x04, .r, u32),
     device_id: RegisterField(0x08, .r, virtio.DeviceType),
 
-    pub fn init(addr: usize) error{InvalidDevice}!*const RegisterHeader {
+    pub fn init(addr: usize) error{ InvalidDevice, UnsupportedDevice }!*const RegisterHeader {
         const self: *const RegisterHeader = @ptrFromInt(addr);
         if (self.magic.read() != expected_magic) {
-            log.err("invalid magic value 0x{x}", .{self.magic.read()});
+            log.err("invalid magic value 0x{X}", .{self.magic.read()});
             return error.InvalidDevice;
         }
         if (self.version.read() != expected_version) {
-            log.err(
-                "invalid device version 0x{x}: currently only supported version 0x{x}",
-                .{ self.version.read(), expected_version },
-            );
-            return error.InvalidDevice;
+            log.err("unsupported device version: expected 0x{X}, got 0x{X}", .{
+                expected_version,
+                self.version.read(),
+            });
+            return error.UnsupportedDevice;
         }
         return self;
     }
@@ -70,23 +70,32 @@ pub const Register = struct {
         return set;
     }
 
-    pub fn writeDriverFeatures(self: *Register, Feature: type, set: virtio.feature.Set(Feature)) void {
+    pub fn writeDriverFeatures(
+        self: *Register,
+        Feature: type,
+        set: virtio.feature.Set(Feature),
+    ) error{UnsupportedDevice}!void {
         for (0..set.array.len) |i| {
             self.driver_features_sel.write(@intCast(i));
             self.driver_features.write(set.array[i]);
         }
+        self.status.writeBit(.{ .features_ok = true });
+        if (!self.status.read().features_ok) {
+            log.err("FEATURES_OK status bit was removed by the device", .{});
+            return error.UnsupportedDevice;
+        }
     }
 
-    pub fn selectQueue(self: *Register, index: u16) error{QueueNotAvailable}!*SelectedQueueRegister {
+    pub fn selectQueue(self: *Register, index: u16) error{QueueAlreadyInUse}!?*SelectedQueueRegister {
         self.queue_sel.write(@intCast(index));
         const selected: *SelectedQueueRegister = @ptrCast(self);
         if (selected.ready.read() != 0) {
-            log.err("virtqueue is already in use", .{});
-            return error.QueueNotAvailable;
+            log.err("virtqueue {}: already in use", .{index});
+            return error.QueueAlreadyInUse;
         }
         if (selected.size_max.read() == 0) {
-            log.err("QueueSizeMax is zero", .{});
-            return error.QueueNotAvailable;
+            log.debug("virtqueue {}: QueueSizeMax is zero", .{index});
+            return null;
         }
         return selected;
     }

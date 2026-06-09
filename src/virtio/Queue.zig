@@ -16,33 +16,27 @@ driver_event: *align(4) volatile EventSuppression,
 
 register: *virtio.mmio.Register,
 
-pub fn init(
-    a: std.mem.Allocator,
-    index: u16,
-    size: usize,
-    register: *virtio.mmio.Register,
-) std.mem.Allocator.Error!Queue {
-    const desc = try a.alignedAlloc(Descriptor, .@"16", size);
-    errdefer a.free(desc);
-    @memset(desc, .init);
-    const supp = try a.alignedAlloc(EventSuppression, .@"4", 2);
-    errdefer a.free(supp);
-    @memset(supp, .init);
+pub fn init(arena: std.mem.Allocator, index: u16, register: *virtio.mmio.Register) virtio.InitError!?Queue {
+    const queue_register = try register.selectQueue(index) orelse return null;
+    const desc_ring = try arena.alignedAlloc(Descriptor, .@"16", queue_register.size_max.read());
+    comptime std.debug.assert(4 == @alignOf(EventSuppression));
+    const device_event = try arena.create(EventSuppression);
+    const driver_event = try arena.create(EventSuppression);
+    @memset(desc_ring, .init);
+    device_event.* = .init;
+    driver_event.* = .init;
+    queue_register.size.write(@intCast(desc_ring.len));
+    queue_register.setAddr(.desc, @intFromPtr(desc_ring.ptr));
+    queue_register.setAddr(.driver, @intFromPtr(device_event));
+    queue_register.setAddr(.device, @intFromPtr(driver_event));
+    queue_register.ready.write(1);
     return .{
         .index = index,
-        .desc_ring = desc,
-        .device_event = &supp[0],
-        .driver_event = &supp[1],
+        .desc_ring = desc_ring,
+        .device_event = device_event,
+        .driver_event = driver_event,
         .register = register,
     };
-}
-
-pub fn getAddr(self: Queue, area: enum { desc, device, driver }) usize {
-    switch (area) {
-        .desc => return @intFromPtr(self.desc_ring.ptr),
-        .device => return @intFromPtr(self.device_event),
-        .driver => return @intFromPtr(self.driver_event),
-    }
 }
 
 pub fn append(

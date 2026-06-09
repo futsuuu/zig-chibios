@@ -120,15 +120,26 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
             continue;
         };
         const address: usize = @truncate(registers.next().?.address());
-        var virtq = try virtio.init(std.heap.page_allocator, address) orelse {
-            log.info("skip initialization of device {s}", .{fdt_node.name});
+        var driver = virtio.init(address) catch |e| switch (e) {
+            error.OutOfMemory, error.QueueAlreadyInUse => return e,
+            error.InvalidDevice, error.UnsupportedDevice => {
+                log.info("skip device {s}", .{fdt_node.name});
+                continue;
+            },
+        } orelse {
+            log.debug("ignore device {s}", .{fdt_node.name});
             continue;
         };
-        log.info("writing message in {s}", .{fdt_node.name});
-        var buf = std.mem.zeroes([512]u8);
-        try virtio.request(&virtq, .read, &buf, 0);
-        @memcpy(buf[0..].ptr, "hello world!");
-        try virtio.request(&virtq, .write, &buf, 0);
+        switch (driver) {
+            .block => |*blk| {
+                defer blk.deinit();
+                log.info("writing message in {s}", .{fdt_node.name});
+                var buf = std.mem.zeroes([512]u8);
+                try blk.request(.read, &buf, 0);
+                @memcpy(buf[0..].ptr, "hello world!");
+                try blk.request(.write, &buf, 0);
+            },
+        }
     }
 
     scheduler = try .init(std.heap.page_allocator);

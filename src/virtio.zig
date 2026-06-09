@@ -6,91 +6,26 @@ pub const block = @import("virtio/block.zig");
 pub const feature = @import("virtio/feature.zig");
 pub const mmio = @import("virtio/mmio.zig");
 
-pub fn request(
-    virtq: *Queue,
-    comptime t: enum { read, write },
-    buf: switch (t) {
-        .read => []u8,
-        .write => []const u8,
-    },
-    sector: u64,
-) block.RequestStatus.Error!void {
-    const header: block.RequestHeader = switch (t) {
-        .read => .init(.read, sector),
-        .write => .init(.write, sector),
-    };
-    var status: block.RequestStatus = undefined;
-    const header_desc = virtq.append(.readonly, std.mem.asBytes(&header), .{ .next = true });
-    const body_desc = switch (t) {
-        .read => virtq.append(.writable, buf, .{ .next = true }),
-        .write => virtq.append(.readonly, buf, .{ .next = true }),
-    };
-    const status_desc = virtq.append(.writable, std.mem.asBytes(&status), .{});
-    status_desc.id = .fromNative(1);
-    virtq.markAsAvailable(body_desc);
-    virtq.markAsAvailable(status_desc);
-    asm volatile ("fence rw, w" ::: .{ .memory = true });
-    virtq.markAsAvailable(header_desc);
+pub const InitError = error{
+    OutOfMemory,
+    InvalidDevice,
+    UnsupportedDevice,
+    QueueAlreadyInUse,
+};
 
-    asm volatile ("fence rw, rw" ::: .{ .memory = true });
-    if (virtq.device_event.getEnabled()) |_| {
-        virtq.register.queue_notify.write(.{ .vq_index = virtq.index, .data = undefined });
-    }
-    while (!virtq.isUsed(header_desc)) {
-        std.atomic.spinLoopHint();
-    }
-    return status.ensureOk();
-}
-
-pub fn init(a: std.mem.Allocator, address: usize) !?Queue {
+pub fn init(address: usize) InitError!?union(enum) {
+    block: block.Driver,
+} {
     errdefer log.err("initialization failed", .{});
     const reg_header: *const mmio.RegisterHeader = try .init(address);
-    switch (reg_header.device_id.read()) {
-        .reserved => return null,
-        .block => {
-            const register: *mmio.Register = .init(reg_header);
-            register.status.write(.reset);
-            register.status.writeBit(.{ .acknowledge = true });
-            errdefer register.status.writeBit(.{ .failed = true });
-
-            register.status.writeBit(.{ .driver = true });
-
-            var features = register.readDeviceFeatures(block.Feature);
-            log.debug("device features: {f}", .{features});
-            try features.require(.{ .reserved = .version_1 });
-            try features.require(.{ .reserved = .ring_packed });
-            features.unset(.{ .reserved = .notification_data });
-            features.unset(.{ .reserved = .notification_config_data });
-            features.unset(.{ .device = .flush });
-            features.unset(.{ .device = .zoned });
-            register.writeDriverFeatures(block.Feature, features);
-            log.debug("driver features: {f}", .{features});
-            register.status.writeBit(.{ .features_ok = true });
-            if (!register.status.read().features_ok) {
-                log.err("device is unusable: FEATURES_OK status bit was removed by the device", .{});
-                return error.UnusableDevice;
-            }
-
-            const queue = b: {
-                const queue_register = try register.selectQueue(0);
-                defer queue_register.ready.write(1);
-                const queue: Queue = try .init(a, 0, queue_register.size_max.read(), register);
-                queue_register.size.write(@intCast(queue.desc_ring.len));
-                queue_register.setAddr(.desc, queue.getAddr(.desc));
-                queue_register.setAddr(.driver, queue.getAddr(.driver));
-                queue_register.setAddr(.device, queue.getAddr(.device));
-                break :b queue;
-            };
-
-            register.status.writeBit(.{ .driver_ok = true });
-
-            return queue;
-        },
+    return switch (reg_header.device_id.read()) {
+        .reserved => null,
+        .block => .{ .block = try .init(reg_header) },
         else => |ty| {
             log.err("unimplemented device type: {}", .{ty});
-            return null;
+            return error.UnsupportedDevice;
         },
-    }
+    };
 }
 
 pub const DeviceStatus = packed struct(u32) {
