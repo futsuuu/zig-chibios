@@ -53,6 +53,10 @@ pub fn build(b: *std.Build) void {
         "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
         "-device",
         "virtio-blk-device,drive=drive0,packed=true",
+        "-netdev",
+        "user,id=net0",
+        "-device",
+        "virtio-net-device,netdev=net0,packed=true",
         "-kernel",
     });
     run_cmd.addArtifactArg(kernel);

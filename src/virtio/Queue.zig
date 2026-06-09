@@ -7,8 +7,8 @@ const Queue = @This();
 
 index: u16,
 desc_ring: []align(16) volatile Descriptor,
-index_counter: usize = 0,
-wrap_counter: bool = true,
+next_available_index: u15 = 0,
+available_wrap_counter: bool = true,
 /// Read-only
 device_event: *align(4) const volatile EventSuppression,
 /// Write-only
@@ -39,6 +39,28 @@ pub fn init(arena: std.mem.Allocator, index: u16, register: *virtio.mmio.Registe
     };
 }
 
+fn addAvailable(self: *Queue) *volatile Descriptor {
+    const desc = &self.desc_ring[self.next_available_index];
+    self.next_available_index +%= 1;
+    if (self.next_available_index == 0) {
+        // wrapped automatically
+        std.debug.assert(self.desc_ring.len == std.math.maxInt(u15) + 1);
+        self.available_wrap_counter = !self.available_wrap_counter;
+    } else if (self.next_available_index == self.desc_ring.len) {
+        // wrapping manually
+        self.next_available_index = 0;
+        self.available_wrap_counter = !self.available_wrap_counter;
+    }
+    return desc;
+}
+
+fn availableFlags(self: Queue) Descriptor.Flags {
+    return .{
+        .available = self.available_wrap_counter,
+        .used = !self.available_wrap_counter,
+    };
+}
+
 pub fn append(
     self: *Queue,
     comptime permission: enum { readonly, writable },
@@ -48,25 +70,69 @@ pub fn append(
     },
     flags: Descriptor.Flags,
 ) *volatile Descriptor {
-    const desc = &self.desc_ring[self.index_counter];
+    const desc = &self.desc_ring[self.next_available_index];
     desc.addr = .fromNative(@intFromPtr(bytes.ptr));
     desc.len = .fromNative(@intCast(bytes.len));
     desc.flags = .fromNative(flags.merge(.{ .write = permission == .writable }));
-    self.index_counter += 1;
-    if (self.index_counter == self.desc_ring.len) {
-        std.debug.panic("handling of descriptor ring overflow is not yet implemented", .{});
-        // self.index_counter = 0;
-        // self.wrap_counter = !self.wrap_counter;
+    self.next_available_index +%= 1;
+    if (self.next_available_index == 0) {
+        // wrapped automatically
+        std.debug.assert(self.desc_ring.len == std.math.maxInt(u15) + 1);
+        self.available_wrap_counter = !self.available_wrap_counter;
+    } else if (self.next_available_index == self.desc_ring.len) {
+        // wrapping manually
+        self.next_available_index = 0;
+        self.available_wrap_counter = !self.available_wrap_counter;
     }
     return desc;
 }
 
 pub fn markAsAvailable(self: Queue, desc: *volatile Descriptor) void {
     desc.flags = .fromNative(desc.flags.toNative().merge(.{
-        .available = self.wrap_counter,
-        .used = !self.wrap_counter,
+        .available = self.available_wrap_counter,
+        .used = !self.available_wrap_counter,
     }));
 }
+
+const DescriptorChain = struct {
+    queue: *Queue,
+    len: usize = 1,
+    first_dest: *volatile Descriptor,
+    first: BufferedDescriptor,
+    last: ?BufferedDescriptor = null,
+
+    const BufferedDescriptor = struct {
+        addr: u64,
+        len: u32,
+        writable: bool,
+    };
+
+    fn next(self: *DescriptorChain, desc: BufferedDescriptor) void {
+        self.len += 1;
+        defer self.last = desc;
+        const prev = self.last orelse return;
+        self.queue.addAvailable().* = .{
+            .addr = .fromNative(prev.addr),
+            .len = .fromNative(prev.len),
+            .id = undefined,
+            .flags = .fromNative(self.queue.availableFlags().merge(.{
+                .next = true,
+                .write = prev.writable,
+            })),
+        };
+    }
+
+    fn done(self: *DescriptorChain) void {
+        if (self.last) |last| self.queue.addAvailable().* = .{
+            .addr = .fromNative(last.addr),
+            .len = .fromNative(last.len),
+            .id = .fromNative(undefined),
+            .flags = .fromNative(self.queue.availableFlags().merge(.{
+                .write = last.writable,
+            })),
+        };
+    }
+};
 
 pub fn isUsed(self: Queue, desc: *const volatile Descriptor) bool {
     _ = self;
@@ -116,7 +182,7 @@ pub const EventSuppression = packed struct(u32) {
 
     pub fn getEnabled(self: EventSuppression) ?union(enum) {
         all,
-        only: struct { index: usize, wrap_counter: bool },
+        only: struct { index: u15, wrap_counter: bool },
     } {
         return switch (self.flags.toNative().flags) {
             .enable => .all,
@@ -124,7 +190,7 @@ pub const EventSuppression = packed struct(u32) {
             .descriptor => .{ .only = b: {
                 const desc = self.desc.toNative();
                 break :b .{
-                    .index = @intCast(desc.offset),
+                    .index = desc.offset,
                     .wrap_counter = desc.wrap,
                 };
             } },

@@ -5,6 +5,7 @@ pub const Queue = @import("virtio/Queue.zig");
 pub const block = @import("virtio/block.zig");
 pub const feature = @import("virtio/feature.zig");
 pub const mmio = @import("virtio/mmio.zig");
+pub const network = @import("virtio/network.zig");
 
 pub const InitError = error{
     OutOfMemory,
@@ -14,12 +15,14 @@ pub const InitError = error{
 };
 
 pub fn init(address: usize) InitError!?union(enum) {
+    network: network.Driver,
     block: block.Driver,
 } {
     errdefer log.err("initialization failed", .{});
     const reg_header: *const mmio.RegisterHeader = try .init(address);
     return switch (reg_header.device_id.read()) {
         .reserved => null,
+        .network => .{ .network = try .init(reg_header) },
         .block => .{ .block = try .init(reg_header) },
         else => |ty| {
             log.err("unimplemented device type: {}", .{ty});

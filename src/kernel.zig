@@ -131,6 +131,9 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
             continue;
         };
         switch (driver) {
+            .network => |*net| {
+                defer net.deinit();
+            },
             .block => |*blk| {
                 defer blk.deinit();
                 log.info("writing message in {s}", .{fdt_node.name});
