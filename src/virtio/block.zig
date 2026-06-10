@@ -67,26 +67,16 @@ pub const Driver = struct {
             .read => .init(.read, sector),
             .write => .init(.write, sector),
         };
+        var chain = self.requestq1.append(.readonly, std.mem.asBytes(&header));
+        switch (t) {
+            .read => chain.next(.writable, buf),
+            .write => chain.next(.readonly, buf),
+        }
         var status: RequestStatus = undefined;
-        const header_desc = self.requestq1.append(.readonly, std.mem.asBytes(&header), .{ .next = true });
-        const body_desc = switch (t) {
-            .read => self.requestq1.append(.writable, buf, .{ .next = true }),
-            .write => self.requestq1.append(.readonly, buf, .{ .next = true }),
-        };
-        const status_desc = self.requestq1.append(.writable, std.mem.asBytes(&status), .{});
-        status_desc.id = .fromNative(1);
-        self.requestq1.markAsAvailable(body_desc);
-        self.requestq1.markAsAvailable(status_desc);
-        asm volatile ("fence rw, w" ::: .{ .memory = true });
-        self.requestq1.markAsAvailable(header_desc);
-
-        asm volatile ("fence rw, rw" ::: .{ .memory = true });
-        if (self.requestq1.device_event.getEnabled()) |_| {
-            self.requestq1.register.queue_notify.write(.{ .vq_index = self.requestq1.index, .data = undefined });
-        }
-        while (!self.requestq1.isUsed(header_desc)) {
-            std.atomic.spinLoopHint();
-        }
+        chain.next(.writable, std.mem.asBytes(&status));
+        const id = chain.finish();
+        const ret = self.requestq1.waitUsed();
+        std.debug.assert(ret.id.toNative() == id);
         return status.ensureOk();
     }
 };

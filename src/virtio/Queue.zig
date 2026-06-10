@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log.scoped(.virtio_queue);
 
 const Le = @import("../endian.zig").Little;
 const virtio = @import("../virtio.zig");
@@ -7,14 +8,26 @@ const Queue = @This();
 
 index: u16,
 desc_ring: []align(16) volatile Descriptor,
-next_available_index: u15 = 0,
+/// Driver ring wrap counter
 available_wrap_counter: bool = true,
+/// Next available descriptor index
+next_available_index: u15 = 0,
+/// Next used descriptor index
+next_used_index: u15 = 0,
 /// Read-only
 device_event: *align(4) const volatile EventSuppression,
 /// Write-only
 driver_event: *align(4) volatile EventSuppression,
 
+buffer_id_pool: BufferIdPool,
+chain_length_map: []u15,
+
 register: *virtio.mmio.Register,
+
+const DescriptorIndex = struct {
+    wrap: bool,
+    index: u15,
+};
 
 pub fn init(arena: std.mem.Allocator, index: u16, register: *virtio.mmio.Register) virtio.InitError!?Queue {
     const queue_register = try register.selectQueue(index) orelse return null;
@@ -35,30 +48,21 @@ pub fn init(arena: std.mem.Allocator, index: u16, register: *virtio.mmio.Registe
         .desc_ring = desc_ring,
         .device_event = device_event,
         .driver_event = driver_event,
+        .buffer_id_pool = try .init(arena, desc_ring.len),
+        .chain_length_map = try arena.alloc(u15, desc_ring.len),
         .register = register,
     };
 }
 
-fn addAvailable(self: *Queue) *volatile Descriptor {
-    const desc = &self.desc_ring[self.next_available_index];
-    self.next_available_index +%= 1;
-    if (self.next_available_index == 0) {
-        // wrapped automatically
-        std.debug.assert(self.desc_ring.len == std.math.maxInt(u15) + 1);
-        self.available_wrap_counter = !self.available_wrap_counter;
-    } else if (self.next_available_index == self.desc_ring.len) {
-        // wrapping manually
-        self.next_available_index = 0;
-        self.available_wrap_counter = !self.available_wrap_counter;
+pub fn waitUsed(self: *Queue) *const volatile Descriptor {
+    const desc = &self.desc_ring[self.next_used_index];
+    while (!self.isUsed(desc)) {
+        std.atomic.spinLoopHint();
     }
+    const id: u15 = @intCast(desc.id.toNative());
+    self.next_used_index += self.chain_length_map[id];
+    self.buffer_id_pool.release(id);
     return desc;
-}
-
-fn availableFlags(self: Queue) Descriptor.Flags {
-    return .{
-        .available = self.available_wrap_counter,
-        .used = !self.available_wrap_counter,
-    };
 }
 
 pub fn append(
@@ -68,12 +72,23 @@ pub fn append(
         .readonly => []const u8,
         .writable => []volatile u8,
     },
-    flags: Descriptor.Flags,
-) *volatile Descriptor {
-    const desc = &self.desc_ring[self.next_available_index];
-    desc.addr = .fromNative(@intFromPtr(bytes.ptr));
-    desc.len = .fromNative(@intCast(bytes.len));
-    desc.flags = .fromNative(flags.merge(.{ .write = permission == .writable }));
+) DescriptorChain {
+    return .{
+        .queue = self,
+        .first_dest = self.nextAvailable(),
+        .first = .{
+            .addr = @intFromPtr(bytes.ptr),
+            .len = @intCast(bytes.len),
+            .writable = permission == .writable,
+        },
+    };
+}
+
+fn nextAvailable(self: *Queue) DescriptorIndex {
+    const idx: DescriptorIndex = .{
+        .index = self.next_available_index,
+        .wrap = self.available_wrap_counter,
+    };
     self.next_available_index +%= 1;
     if (self.next_available_index == 0) {
         // wrapped automatically
@@ -84,20 +99,20 @@ pub fn append(
         self.next_available_index = 0;
         self.available_wrap_counter = !self.available_wrap_counter;
     }
-    return desc;
+    return idx;
 }
 
-pub fn markAsAvailable(self: Queue, desc: *volatile Descriptor) void {
-    desc.flags = .fromNative(desc.flags.toNative().merge(.{
-        .available = self.available_wrap_counter,
-        .used = !self.available_wrap_counter,
-    }));
+pub fn notify(self: *Queue) void {
+    asm volatile ("fence rw, rw" ::: .{ .memory = true });
+    if (self.device_event.getEnabled()) |_| {
+        self.register.queue_notify.write(.{ .vq_index = self.index, .data = undefined });
+    }
 }
 
 const DescriptorChain = struct {
     queue: *Queue,
-    len: usize = 1,
-    first_dest: *volatile Descriptor,
+    len: u15 = 1,
+    first_dest: DescriptorIndex,
     first: BufferedDescriptor,
     last: ?BufferedDescriptor = null,
 
@@ -105,32 +120,60 @@ const DescriptorChain = struct {
         addr: u64,
         len: u32,
         writable: bool,
+
+        fn write(
+            self: BufferedDescriptor,
+            queue: *Queue,
+            dest_index: DescriptorIndex,
+            id: ?u15,
+        ) void {
+            queue.desc_ring[dest_index.index] = .{
+                .addr = .fromNative(self.addr),
+                .len = .fromNative(self.len),
+                .id = if (id) |i| .fromNative(i) else undefined,
+                .flags = .fromNative(.{
+                    .next = id == null,
+                    .write = self.writable,
+                    .available = dest_index.wrap,
+                    .used = !dest_index.wrap,
+                }),
+            };
+        }
     };
 
-    fn next(self: *DescriptorChain, desc: BufferedDescriptor) void {
+    pub fn next(
+        self: *DescriptorChain,
+        comptime permission: enum { readonly, writable },
+        bytes: switch (permission) {
+            .readonly => []const u8,
+            .writable => []volatile u8,
+        },
+    ) void {
         self.len += 1;
-        defer self.last = desc;
-        const prev = self.last orelse return;
-        self.queue.addAvailable().* = .{
-            .addr = .fromNative(prev.addr),
-            .len = .fromNative(prev.len),
-            .id = undefined,
-            .flags = .fromNative(self.queue.availableFlags().merge(.{
-                .next = true,
-                .write = prev.writable,
-            })),
+        if (self.last) |prev| {
+            prev.write(self.queue, self.queue.nextAvailable(), null);
+        }
+        self.last = .{
+            .addr = @intFromPtr(bytes.ptr),
+            .len = @intCast(bytes.len),
+            .writable = permission == .writable,
         };
     }
 
-    fn done(self: *DescriptorChain) void {
-        if (self.last) |last| self.queue.addAvailable().* = .{
-            .addr = .fromNative(last.addr),
-            .len = .fromNative(last.len),
-            .id = .fromNative(undefined),
-            .flags = .fromNative(self.queue.availableFlags().merge(.{
-                .write = last.writable,
-            })),
-        };
+    pub fn finish(self: *DescriptorChain) u15 {
+        defer self.queue.notify();
+        return self.finishWithoutNotify();
+    }
+
+    pub fn finishWithoutNotify(self: *DescriptorChain) u15 {
+        const id = self.queue.buffer_id_pool.acquire();
+        if (self.last) |last| {
+            last.write(self.queue, self.queue.nextAvailable(), id);
+        }
+        self.queue.chain_length_map[id] = self.len;
+        asm volatile ("fence rw, w" ::: .{ .memory = true });
+        self.first.write(self.queue, self.first_dest, if (self.last != null) null else id);
+        return id;
     }
 };
 
@@ -202,4 +245,36 @@ pub const EventSuppression = packed struct(u32) {
         disable = 1,
         descriptor = 2,
     };
+};
+
+const BufferIdPool = struct {
+    free_set: std.DynamicBitSetUnmanaged,
+
+    fn init(allocator: std.mem.Allocator, desc_ring_len: usize) std.mem.Allocator.Error!BufferIdPool {
+        if (std.math.maxInt(u15) + 1 < desc_ring_len) {
+            std.debug.panic("too large descriptor ring size: {}", .{desc_ring_len});
+        }
+        return .{
+            .free_set = try .initFull(allocator, desc_ring_len),
+        };
+    }
+
+    fn deinit(self: BufferIdPool, allocator: std.mem.Allocator) void {
+        self.free_set.deinit(allocator);
+    }
+
+    fn acquire(self: *BufferIdPool) u15 {
+        const id = self.free_set.findFirstSet() orelse {
+            std.debug.panic("Buffer ID leaked", .{});
+        };
+        self.free_set.unset(id);
+        return @intCast(id);
+    }
+
+    fn release(self: *BufferIdPool, id: u15) void {
+        if (self.free_set.isSet(id)) {
+            std.debug.panic("invalid Buffer ID: {}", .{id});
+        }
+        self.free_set.set(id);
+    }
 };

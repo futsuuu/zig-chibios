@@ -46,11 +46,12 @@ pub const Driver = struct {
         for (0..receiveq1.desc_ring.len) |i| {
             const buf = try bump.allocator().alloc(u8, 128);
             receive_bufs[i] = buf;
-            const desc = receiveq1.append(.writable, buf, .{});
-            receiveq1.markAsAvailable(desc);
+            var chain = receiveq1.append(.writable, buf);
+            _ = chain.finishWithoutNotify();
         }
 
         register.status.writeBit(.{ .driver_ok = true });
+        receiveq1.notify();
         return .{
             .bump = bump,
             .receiveq1 = receiveq1,
