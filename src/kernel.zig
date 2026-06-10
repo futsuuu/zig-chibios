@@ -5,6 +5,7 @@ const log = std.log.scoped(.kernel);
 pub const Fdt = @import("Fdt.zig");
 pub const Process = @import("Process.zig");
 pub const buddy_allocator = @import("buddy_allocator.zig");
+pub const network = @import("network.zig");
 pub const sbi = @import("sbi.zig");
 pub const sv32 = @import("sv32.zig");
 pub const trap = @import("trap.zig");
@@ -133,6 +134,25 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
         switch (driver) {
             .network => |*net| {
                 defer net.deinit();
+
+                const source_mac: network.MACAddress = net.macAddress() orelse .init(.{ 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 });
+                log.info("our MAC address is {f}", .{source_mac});
+                const source_ip: network.IPv4Address = .init(.{ 10, 0, 2, 15 });
+                const target_ip: network.IPv4Address = .init(.{ 10, 0, 2, 2 });
+
+                const arp_req = network.buildARPRequest(source_mac, source_ip, target_ip);
+
+                log.info("sending ARP request for {f}", .{target_ip});
+                net.sendFrame(&arp_req);
+
+                var recv_buf: [256]u8 = undefined;
+                const resolved_mac = while (true) {
+                    const len = net.receiveFrame(&recv_buf) orelse continue;
+                    const frame = recv_buf[0..len];
+                    if (network.parseARPReply(frame, source_ip)) |mac| break mac;
+                };
+
+                log.info("resolved MAC address is {f}", .{resolved_mac});
             },
             .block => |*blk| {
                 defer blk.deinit();
