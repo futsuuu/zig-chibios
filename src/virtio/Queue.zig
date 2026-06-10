@@ -8,12 +8,8 @@ const Queue = @This();
 
 index: u16,
 desc_ring: []align(16) volatile Descriptor,
-/// Driver ring wrap counter
-available_wrap_counter: bool = true,
-/// Next available descriptor index
-next_available_index: u15 = 0,
-/// Next used descriptor index
-next_used_index: u15 = 0,
+avail_counter: u64 = 0,
+used_counter: u64 = 0,
 /// Read-only
 device_event: *align(4) const volatile EventSuppression,
 /// Write-only
@@ -55,12 +51,12 @@ pub fn init(arena: std.mem.Allocator, index: u16, register: *virtio.mmio.Registe
 }
 
 pub fn waitUsed(self: *Queue) *const volatile Descriptor {
-    const desc = &self.desc_ring[self.next_used_index];
+    const desc = &self.desc_ring[@intCast(self.used_counter % self.desc_ring.len)];
     while (!self.isUsed(desc)) {
         std.atomic.spinLoopHint();
     }
     const id: u15 = @intCast(desc.id.toNative());
-    self.next_used_index += self.chain_length_map[id];
+    self.used_counter += self.chain_length_map[id];
     self.buffer_id_pool.release(id);
     return desc;
 }
@@ -85,21 +81,13 @@ pub fn append(
 }
 
 fn nextAvailable(self: *Queue) DescriptorIndex {
-    const idx: DescriptorIndex = .{
-        .index = self.next_available_index,
-        .wrap = self.available_wrap_counter,
+    defer self.avail_counter += 1;
+    const div = self.avail_counter / self.desc_ring.len;
+    const rem = self.avail_counter % self.desc_ring.len;
+    return .{
+        .index = @intCast(rem),
+        .wrap = div % 2 == 0,
     };
-    self.next_available_index +%= 1;
-    if (self.next_available_index == 0) {
-        // wrapped automatically
-        std.debug.assert(self.desc_ring.len == std.math.maxInt(u15) + 1);
-        self.available_wrap_counter = !self.available_wrap_counter;
-    } else if (self.next_available_index == self.desc_ring.len) {
-        // wrapping manually
-        self.next_available_index = 0;
-        self.available_wrap_counter = !self.available_wrap_counter;
-    }
-    return idx;
 }
 
 pub fn notify(self: *Queue) void {
