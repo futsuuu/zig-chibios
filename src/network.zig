@@ -42,14 +42,14 @@ pub const EtherType = enum(u16) {
 };
 
 pub const ARPHeader = extern struct {
-    hardware: Be(ARPHardwareType),
+    hardware: ARPHardwareType,
     protocol: Be(EtherType),
     hardware_address_size: u8,
     protocol_address_size: u8,
     operation: Be(ARPOperation),
 };
 
-pub fn StaticARPBody(hardware: ARPHardwareType, protocol: EtherType) type {
+pub fn StaticARPBody(hardware: HardwareType, protocol: EtherType) type {
     return extern struct {
         source_hardware_address: [hardware.addressSizeHint().?]u8,
         source_protocol_address: [protocol.addressSizeHint().?]u8,
@@ -58,12 +58,21 @@ pub fn StaticARPBody(hardware: ARPHardwareType, protocol: EtherType) type {
     };
 }
 
-pub const ARPHardwareType = enum(u16) {
+pub const ARPHardwareType = packed struct(u16) {
+    _: u8 = 0,
+    low: HardwareType,
+
+    pub fn init(t: HardwareType) ARPHardwareType {
+        return .{ .low = t };
+    }
+};
+
+pub const HardwareType = enum(u8) {
     Ethernet = 1,
     IEEE_802 = 6,
     _,
 
-    fn addressSizeHint(self: ARPHardwareType) ?u8 {
+    fn addressSizeHint(self: HardwareType) ?u8 {
         return switch (self) {
             .Ethernet => 6,
             .IEEE_802 => null,
@@ -89,9 +98,9 @@ pub fn buildARPRequest(
         .protocol = .fromNative(.ARP),
     };
     const arp_header: ARPHeader = .{
-        .hardware = .fromNative(.Ethernet),
+        .hardware = .init(.Ethernet),
         .protocol = .fromNative(.IPv4),
-        .hardware_address_size = ARPHardwareType.addressSizeHint(.Ethernet).?,
+        .hardware_address_size = HardwareType.addressSizeHint(.Ethernet).?,
         .protocol_address_size = EtherType.addressSizeHint(.IPv4).?,
         .operation = .fromNative(.request),
     };
@@ -134,4 +143,160 @@ pub const IPv4Address = extern struct {
             self.octets[0], self.octets[1], self.octets[2], self.octets[3],
         });
     }
+};
+
+/// https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+pub const IPProtocolType = enum(u8) {
+    ICMP = 1,
+    TCP = 6,
+    UDP = 17,
+    ICMPv6 = 58,
+    _,
+};
+
+/// https://datatracker.ietf.org/doc/html/rfc791
+pub const IPv4Header = extern struct {
+    meta: Metadata,
+    type_of_service: u8,
+    total_length: Be(u16),
+    identification: Be(u16),
+    fragment: Be(Fragment),
+    time_to_live: u8,
+    protocol: IPProtocolType,
+    header_checksum: Be(u16),
+    source_address: IPv4Address,
+    destination_address: IPv4Address,
+
+    pub const Metadata = packed struct(u8) {
+        internet_header_length: u4,
+        version: u4 = 4,
+    };
+
+    pub const Fragment = packed struct(u16) {
+        /// Fragment offset in 8-byte units
+        offset: u13 = 0,
+        /// `false`: May Fragment, `true`: More Fragments
+        more_fragments: bool = false,
+        /// `false`: May Fragment, `true`: Don't Fragment
+        dont_fragment: bool = false,
+        /// Reserved (must be zero)
+        _: u1 = 0,
+    };
+
+    test Fragment {
+        const bytes: [2]u8 = .{ 0b0100_0000, 0b0000_1010 };
+        try std.testing.expectEqual(
+            Fragment{
+                .offset = 10,
+                .more_fragments = false,
+                .dont_fragment = true,
+            },
+            std.mem.bytesToValue(Be(Fragment), &bytes).toNative(),
+        );
+    }
+};
+
+/// https://datatracker.ietf.org/doc/html/rfc1071
+pub fn computeChecksum(bytes: []const u8) u16 {
+    var sum: u32 = 0;
+    var i: usize = 0;
+    while (i + 1 < bytes.len) : (i += 2) {
+        sum += @as(u16, bytes[i]) << 8 | bytes[i + 1];
+    }
+    if (i < bytes.len) {
+        sum += @as(u16, bytes[i]) << 8;
+    }
+    while (sum >> 16 != 0) {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    return ~@as(u16, @truncate(sum));
+}
+
+test computeChecksum {
+    try std.testing.expectEqual(
+        ~@as(u16, 0xddf2),
+        computeChecksum(&.{
+            0x00, 0x01,
+            0xf2, 0x03,
+            0xf4, 0xf5,
+            0xf6, 0xf7,
+        }),
+    );
+}
+
+pub const ICMPType = enum(u8) {
+    destination_unreachable = 3,
+    time_exceeded = 11,
+    parameter_problem = 12,
+    source_quench = 4,
+    redirect = 5,
+    echo = 8,
+    echo_reply = 0,
+    timestamp = 13,
+    timestamp_reply = 14,
+    information_request = 15,
+    information_reply = 16,
+};
+
+pub const ICMPEchoHeader = extern struct {
+    type: ICMPType,
+    code: u8 = 0,
+    checksum: Be(u16),
+    identifier: Be(u16) = .fromNative(0),
+    sequence: Be(u16) = .fromNative(0),
+};
+
+/// https://datatracker.ietf.org/doc/html/rfc0768
+pub const UDPHeader = extern struct {
+    source_port: Be(UDPPort),
+    destination_port: Be(UDPPort),
+    /// Length of the UDP segment
+    length: Be(u16),
+    checksum: Be(u16),
+};
+
+pub const PseudoUDPHeader = extern struct {
+    source_address: IPv4Address,
+    destination_address: IPv4Address,
+    _: u8 = 0,
+    protocol: IPProtocolType,
+    /// Length of the TCP/UDP segment
+    length: Be(u16),
+};
+
+pub const UDPPort = enum(u16) {
+    BOOTP_server = 67,
+    BOOTP_client = 68,
+    _,
+
+    pub const DHCP_server: UDPPort = .BOOTP_server;
+    pub const DHCP_client: UDPPort = .BOOTP_client;
+};
+
+/// https://datatracker.ietf.org/doc/html/rfc2131
+pub const DHCPMessage = extern struct {
+    operation: BOOTPOperation,
+    hardware: HardwareType,
+    hardware_address_size: u8,
+    hops: u8 = 0,
+    transaction_id: u32,
+    secs: u16,
+    flags: Be(Flags),
+    client_ip_address: IPv4Address,
+    your_ip_address: IPv4Address,
+    server_ip_address: IPv4Address,
+    gateway_ip_address: IPv4Address,
+    client_hardware_address: [16]u8,
+    server_host_name: [64]u8,
+    file: [128]u8,
+
+    pub const Flags = packed struct(u16) {
+        _: u15 = 0,
+        broadcast: bool,
+    };
+};
+
+pub const BOOTPOperation = enum(u8) {
+    request = 1,
+    reply = 2,
 };
