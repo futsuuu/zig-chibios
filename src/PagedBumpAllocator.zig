@@ -81,7 +81,7 @@ const Node = struct {
 
     fn getParent(self: Node) ?*Node {
         comptime std.debug.assert(@alignOf(Node) < page_size);
-        const casted: *Node = @alignCast(@ptrCast(self.fba.buffer.ptr));
+        const casted: *Node = @ptrCast(@alignCast(self.fba.buffer.ptr));
         return if (casted.isNil()) null else casted;
     }
 };
