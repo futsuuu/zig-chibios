@@ -135,12 +135,12 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
             .network => |*net| {
                 defer net.deinit();
 
-                const source_mac: network.MACAddress = net.macAddress() orelse .init(.{ 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 });
+                const source_mac: network.MacAddress = net.macAddress() orelse .init(.{ 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 });
                 log.info("our MAC address is {f}", .{source_mac});
-                const source_ip: network.IPv4Address = .init(.{ 10, 0, 2, 15 });
-                const target_ip: network.IPv4Address = .init(.{ 10, 0, 2, 2 });
+                const source_ip: network.Ipv4Address = .init(.{ 10, 0, 2, 15 });
+                const target_ip: network.Ipv4Address = .init(.{ 10, 0, 2, 2 });
 
-                const arp_req = network.buildARPRequest(source_mac, source_ip, target_ip);
+                const arp_req = network.buildArpRequest(source_mac, source_ip, target_ip);
 
                 log.info("sending ARP request for {f}", .{target_ip});
                 net.sendFrame(&arp_req);
@@ -149,12 +149,12 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
                 const resolved_mac = while (true) {
                     const len = net.receiveFrame(&recv_buf) orelse continue;
                     const frame = recv_buf[0..len];
-                    if (network.parseARPReply(frame, source_ip)) |mac| break mac;
+                    if (network.parseArpReply(frame, source_ip)) |mac| break mac;
                 };
 
                 log.info("resolved MAC address is {f}", .{resolved_mac});
 
-                const icmp_req = network.buildICMPEchoRequest(
+                const icmp_req = network.buildIcmpEchoRequest(
                     source_mac,
                     resolved_mac,
                     source_ip,
@@ -169,7 +169,7 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
                 const icmp_ok = while (true) {
                     const len = net.receiveFrame(&recv_buf) orelse continue;
                     const frame = recv_buf[0..len];
-                    if (network.parseICMPEchoReply(frame, 0x1234, 1)) break true;
+                    if (network.parseIcmpEchoReply(frame, 0x1234, 1)) break true;
                 };
                 log.info("ICMP echo reply received: {}", .{icmp_ok});
             },

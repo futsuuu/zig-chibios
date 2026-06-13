@@ -2,17 +2,17 @@ const std = @import("std");
 
 const Be = @import("endian.zig").Big;
 
-pub const MACAddress = extern struct {
+pub const MacAddress = extern struct {
     octets: [6]u8,
 
-    pub const unspecified: MACAddress = .init(@splat(0x00));
-    pub const broadcast: MACAddress = .init(@splat(0xff));
+    pub const unspecified: MacAddress = .init(@splat(0x00));
+    pub const broadcast: MacAddress = .init(@splat(0xff));
 
-    pub fn init(address: [6]u8) MACAddress {
+    pub fn init(address: [6]u8) MacAddress {
         return .{ .octets = address };
     }
 
-    pub fn format(self: MACAddress, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    pub fn format(self: MacAddress, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}:{X:0>2}", .{
             self.octets[0], self.octets[1], self.octets[2],
             self.octets[3], self.octets[4], self.octets[5],
@@ -21,35 +21,35 @@ pub const MACAddress = extern struct {
 };
 
 pub const EthernetHeader = extern struct {
-    target_mac_address: MACAddress,
-    source_mac_address: MACAddress,
+    target_mac_address: MacAddress,
+    source_mac_address: MacAddress,
     protocol: Be(EtherType),
 };
 
 pub const EtherType = enum(u16) {
-    IPv4 = 0x800,
-    ARP = 0x806,
-    WoL = 0x842,
-    IPv6 = 0x86dd,
+    ipv4 = 0x800,
+    arp = 0x806,
+    wol = 0x842,
+    ipv6 = 0x86dd,
     _,
 
     fn addressSizeHint(self: EtherType) ?u8 {
         return switch (self) {
-            .IPv4 => 4,
+            .ipv4 => 4,
             else => null,
         };
     }
 };
 
-pub const ARPHeader = extern struct {
-    hardware: ARPHardwareType,
+pub const ArpHeader = extern struct {
+    hardware: ArpHardwareType,
     protocol: Be(EtherType),
     hardware_address_size: u8,
     protocol_address_size: u8,
-    operation: Be(ARPOperation),
+    operation: Be(ArpOperation),
 };
 
-pub fn StaticARPBody(hardware: HardwareType, protocol: EtherType) type {
+pub fn StaticArpBody(hardware: HardwareType, protocol: EtherType) type {
     return extern struct {
         source_hardware_address: [hardware.addressSizeHint().?]u8,
         source_protocol_address: [protocol.addressSizeHint().?]u8,
@@ -58,87 +58,85 @@ pub fn StaticARPBody(hardware: HardwareType, protocol: EtherType) type {
     };
 }
 
-pub const ARPHardwareType = packed struct(u16) {
+pub const ArpHardwareType = packed struct(u16) {
     _: u8 = 0,
     low: HardwareType,
 
-    pub fn init(t: HardwareType) ARPHardwareType {
+    pub fn init(t: HardwareType) ArpHardwareType {
         return .{ .low = t };
     }
 };
 
 pub const HardwareType = enum(u8) {
-    Ethernet = 1,
-    IEEE_802 = 6,
+    ethernet = 1,
     _,
 
     fn addressSizeHint(self: HardwareType) ?u8 {
         return switch (self) {
-            .Ethernet => 6,
-            .IEEE_802 => null,
+            .ethernet => 6,
             _ => null,
         };
     }
 };
 
-pub const ARPOperation = enum(u16) {
+pub const ArpOperation = enum(u16) {
     request = 1,
     reply = 2,
     _,
 };
 
-pub fn buildARPRequest(
-    our_mac: MACAddress,
-    our_ip: IPv4Address,
-    target_ip: IPv4Address,
-) [@sizeOf(EthernetHeader) + @sizeOf(ARPHeader) + @sizeOf(StaticARPBody(.Ethernet, .IPv4))]u8 {
+pub fn buildArpRequest(
+    our_mac: MacAddress,
+    our_ip: Ipv4Address,
+    target_ip: Ipv4Address,
+) [@sizeOf(EthernetHeader) + @sizeOf(ArpHeader) + @sizeOf(StaticArpBody(.ethernet, .ipv4))]u8 {
     const ethernet_header: EthernetHeader = .{
         .target_mac_address = .broadcast,
         .source_mac_address = our_mac,
-        .protocol = .fromNative(.ARP),
+        .protocol = .fromNative(.arp),
     };
-    const arp_header: ARPHeader = .{
-        .hardware = .init(.Ethernet),
-        .protocol = .fromNative(.IPv4),
-        .hardware_address_size = HardwareType.addressSizeHint(.Ethernet).?,
-        .protocol_address_size = EtherType.addressSizeHint(.IPv4).?,
+    const arp_header: ArpHeader = .{
+        .hardware = .init(.ethernet),
+        .protocol = .fromNative(.ipv4),
+        .hardware_address_size = HardwareType.addressSizeHint(.ethernet).?,
+        .protocol_address_size = EtherType.addressSizeHint(.ipv4).?,
         .operation = .fromNative(.request),
     };
-    const arp_body: StaticARPBody(.Ethernet, .IPv4) = .{
+    const arp_body: StaticArpBody(.ethernet, .ipv4) = .{
         .source_hardware_address = our_mac.octets,
         .source_protocol_address = our_ip.octets,
-        .target_hardware_address = MACAddress.unspecified.octets,
+        .target_hardware_address = MacAddress.unspecified.octets,
         .target_protocol_address = target_ip.octets,
     };
     return std.mem.toBytes(ethernet_header) ++ std.mem.toBytes(arp_header) ++ std.mem.toBytes(arp_body);
 }
 
-pub fn parseARPReply(frame: []const u8, our_ip: IPv4Address) ?MACAddress {
+pub fn parseArpReply(frame: []const u8, our_ip: Ipv4Address) ?MacAddress {
     var r: std.Io.Reader = .fixed(frame);
 
     const ethernet_header = r.takeStructPointer(EthernetHeader) catch return null;
-    if (ethernet_header.protocol.toNative() != .ARP) return null;
+    if (ethernet_header.protocol.toNative() != .arp) return null;
 
-    const arp_header = r.takeStructPointer(ARPHeader) catch return null;
+    const arp_header = r.takeStructPointer(ArpHeader) catch return null;
     if (arp_header.operation.toNative() != .reply) return null;
 
-    const arp_body = r.takeStructPointer(StaticARPBody(.Ethernet, .IPv4)) catch return null;
+    const arp_body = r.takeStructPointer(StaticArpBody(.ethernet, .ipv4)) catch return null;
     if (!std.mem.eql(u8, &arp_body.target_protocol_address, &our_ip.octets)) return null;
 
     return .init(arp_body.source_hardware_address);
 }
 
-pub const IPv4Address = extern struct {
+pub const Ipv4Address = extern struct {
     octets: [4]u8,
 
-    pub const unspecified: IPv4Address = .init(@splat(0));
-    pub const broadcast: IPv4Address = .init(@splat(255));
+    pub const unspecified: Ipv4Address = .init(@splat(0));
+    pub const broadcast: Ipv4Address = .init(@splat(255));
 
-    pub fn init(address: [4]u8) IPv4Address {
+    pub fn init(address: [4]u8) Ipv4Address {
         return .{ .octets = address };
     }
 
-    pub fn format(self: IPv4Address, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+    pub fn format(self: Ipv4Address, writer: *std.Io.Writer) std.Io.Writer.Error!void {
         try writer.print("{}.{}.{}.{}", .{
             self.octets[0], self.octets[1], self.octets[2], self.octets[3],
         });
@@ -146,26 +144,26 @@ pub const IPv4Address = extern struct {
 };
 
 /// https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
-pub const IPProtocolType = enum(u8) {
-    ICMP = 1,
-    TCP = 6,
-    UDP = 17,
-    ICMPv6 = 58,
+pub const IpProtocolType = enum(u8) {
+    icmp = 1,
+    tcp = 6,
+    udp = 17,
+    icmpv6 = 58,
     _,
 };
 
 /// https://datatracker.ietf.org/doc/html/rfc791
-pub const IPv4Header = extern struct {
+pub const Ipv4Header = extern struct {
     meta: Metadata,
     type_of_service: u8,
     total_length: Be(u16),
     identification: Be(u16),
     fragment: Be(Fragment),
     time_to_live: u8,
-    protocol: IPProtocolType,
+    protocol: IpProtocolType,
     header_checksum: Be(u16),
-    source_address: IPv4Address,
-    destination_address: IPv4Address,
+    source_address: Ipv4Address,
+    destination_address: Ipv4Address,
 
     pub const Metadata = packed struct(u8) {
         internet_header_length: u4,
@@ -224,7 +222,7 @@ test computeChecksum {
     );
 }
 
-pub const ICMPType = enum(u8) {
+pub const IcmpType = enum(u8) {
     destination_unreachable = 3,
     time_exceeded = 11,
     parameter_problem = 12,
@@ -238,36 +236,36 @@ pub const ICMPType = enum(u8) {
     information_reply = 16,
 };
 
-pub const ICMPEchoHeader = extern struct {
-    type: ICMPType,
+pub const IcmpEchoHeader = extern struct {
+    type: IcmpType,
     code: u8 = 0,
     checksum: Be(u16),
     identifier: Be(u16) = .fromNative(0),
     sequence: Be(u16) = .fromNative(0),
 };
 
-pub fn buildICMPEchoRequest(
-    source_mac: MACAddress,
-    target_mac: MACAddress,
-    source_ip: IPv4Address,
-    target_ip: IPv4Address,
+pub fn buildIcmpEchoRequest(
+    source_mac: MacAddress,
+    target_mac: MacAddress,
+    source_ip: Ipv4Address,
+    target_ip: Ipv4Address,
     identifier: u16,
     sequence: u16,
-) [@sizeOf(EthernetHeader) + @sizeOf(IPv4Header) + @sizeOf(ICMPEchoHeader)]u8 {
+) [@sizeOf(EthernetHeader) + @sizeOf(Ipv4Header) + @sizeOf(IcmpEchoHeader)]u8 {
     const ethernet_header: EthernetHeader = .{
         .target_mac_address = target_mac,
         .source_mac_address = source_mac,
-        .protocol = .fromNative(.IPv4),
+        .protocol = .fromNative(.ipv4),
     };
 
-    var ip_header: IPv4Header = .{
+    var ip_header: Ipv4Header = .{
         .meta = .{ .internet_header_length = 5 },
         .type_of_service = 0,
-        .total_length = .fromNative(@sizeOf(IPv4Header) + @sizeOf(ICMPEchoHeader)),
+        .total_length = .fromNative(@sizeOf(Ipv4Header) + @sizeOf(IcmpEchoHeader)),
         .identification = .fromNative(0),
         .fragment = .fromNative(.{ .dont_fragment = true }),
         .time_to_live = 64,
-        .protocol = .ICMP,
+        .protocol = .icmp,
         .header_checksum = .fromNative(0),
         .source_address = source_ip,
         .destination_address = target_ip,
@@ -275,7 +273,7 @@ pub fn buildICMPEchoRequest(
     const ip_checksum = computeChecksum(std.mem.asBytes(&ip_header));
     ip_header.header_checksum = .fromNative(ip_checksum);
 
-    var icmp_header: ICMPEchoHeader = .{
+    var icmp_header: IcmpEchoHeader = .{
         .type = .echo,
         .code = 0,
         .checksum = .fromNative(0),
@@ -288,16 +286,16 @@ pub fn buildICMPEchoRequest(
     return std.mem.toBytes(ethernet_header) ++ std.mem.toBytes(ip_header) ++ std.mem.toBytes(icmp_header);
 }
 
-pub fn parseICMPEchoReply(frame: []const u8, expected_id: u16, expected_seq: u16) bool {
+pub fn parseIcmpEchoReply(frame: []const u8, expected_id: u16, expected_seq: u16) bool {
     var r: std.Io.Reader = .fixed(frame);
 
     const ethernet_header = r.takeStructPointer(EthernetHeader) catch return false;
-    if (ethernet_header.protocol.toNative() != .IPv4) return false;
+    if (ethernet_header.protocol.toNative() != .ipv4) return false;
 
-    const ip_header = r.takeStructPointer(IPv4Header) catch return false;
-    if (ip_header.protocol != .ICMP) return false;
+    const ip_header = r.takeStructPointer(Ipv4Header) catch return false;
+    if (ip_header.protocol != .icmp) return false;
 
-    const icmp_header = r.takeStructPointer(ICMPEchoHeader) catch return false;
+    const icmp_header = r.takeStructPointer(IcmpEchoHeader) catch return false;
     if (icmp_header.type != .echo_reply) return false;
     if (icmp_header.identifier.toNative() != expected_id) return false;
     if (icmp_header.sequence.toNative() != expected_seq) return false;
@@ -306,45 +304,45 @@ pub fn parseICMPEchoReply(frame: []const u8, expected_id: u16, expected_seq: u16
 }
 
 /// https://datatracker.ietf.org/doc/html/rfc0768
-pub const UDPHeader = extern struct {
-    source_port: Be(UDPPort),
-    destination_port: Be(UDPPort),
+pub const UdpHeader = extern struct {
+    source_port: Be(UdpPort),
+    destination_port: Be(UdpPort),
     /// Length of the UDP segment
     length: Be(u16),
     checksum: Be(u16),
 };
 
-pub const PseudoUDPHeader = extern struct {
-    source_address: IPv4Address,
-    destination_address: IPv4Address,
+pub const PseudoUdpHeader = extern struct {
+    source_address: Ipv4Address,
+    destination_address: Ipv4Address,
     _: u8 = 0,
-    protocol: IPProtocolType,
+    protocol: IpProtocolType,
     /// Length of the TCP/UDP segment
     length: Be(u16),
 };
 
-pub const UDPPort = enum(u16) {
-    BOOTP_server = 67,
-    BOOTP_client = 68,
+pub const UdpPort = enum(u16) {
+    bootp_server = 67,
+    bootp_client = 68,
     _,
 
-    pub const DHCP_server: UDPPort = .BOOTP_server;
-    pub const DHCP_client: UDPPort = .BOOTP_client;
+    pub const dhcp_server: UdpPort = .bootp_server;
+    pub const dhcp_client: UdpPort = .bootp_client;
 };
 
 /// https://datatracker.ietf.org/doc/html/rfc2131
-pub const DHCPMessage = extern struct {
-    operation: BOOTPOperation,
+pub const DhcpMessage = extern struct {
+    operation: BootpOperation,
     hardware: HardwareType,
     hardware_address_size: u8,
     hops: u8 = 0,
     transaction_id: u32,
-    secs: Be(u16) = 0,
+    secs: Be(u16) = .fromNative(0),
     flags: Be(Flags),
-    client_ip_address: IPv4Address,
-    your_ip_address: IPv4Address,
-    server_ip_address: IPv4Address,
-    gateway_ip_address: IPv4Address,
+    client_ip_address: Ipv4Address,
+    your_ip_address: Ipv4Address,
+    server_ip_address: Ipv4Address,
+    gateway_ip_address: Ipv4Address,
     client_hardware_address: [16]u8,
     server_host_name: [64]u8 = @splat(0),
     file: [128]u8 = @splat(0),
@@ -357,16 +355,16 @@ pub const DHCPMessage = extern struct {
     };
 };
 
-pub const BOOTPOperation = enum(u8) {
+pub const BootpOperation = enum(u8) {
     request = 1,
     reply = 2,
 };
 
-/// https://datatracker.ietf.org/doc/html/rfc1497
+/// https://datatracker.ietf.org/doc/html/rfc2132
 pub const bootp_magic_cookie = std.mem.nativeToBig(u32, 0x63_82_53_63);
 
 /// https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
-pub const DHCPOptionCode = enum(u8) {
+pub const DhcpOptionCode = enum(u8) {
     padding = 0,
     subnet_mask = 1,
     time_offset = 2,
@@ -396,7 +394,7 @@ pub const DHCPOptionCode = enum(u8) {
 };
 
 /// https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
-pub const DHCPMessageType = enum(u8) {
+pub const DhcpMessageType = enum(u8) {
     discover = 1,
     offer = 2,
     request = 3,

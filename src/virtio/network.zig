@@ -72,7 +72,7 @@ pub const Driver = struct {
         self.bump.deinit();
     }
 
-    pub fn macAddress(self: *Driver) ?network.MACAddress {
+    pub fn macAddress(self: *Driver) ?network.MacAddress {
         if (self.features.has(.{ .device = .mac_address })) {
             const config = self.register.config(Config);
             return config.mac_address;
@@ -116,7 +116,7 @@ pub const Driver = struct {
 };
 
 pub const Config = extern struct {
-    mac_address: network.MACAddress,
+    mac_address: network.MacAddress,
     status: Le(Status),
     max_virtqueue_pairs: Le(u16),
     mtu: Le(u16),
