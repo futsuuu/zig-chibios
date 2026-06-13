@@ -339,15 +339,17 @@ pub const DHCPMessage = extern struct {
     hardware_address_size: u8,
     hops: u8 = 0,
     transaction_id: u32,
-    secs: u16,
+    secs: Be(u16) = 0,
     flags: Be(Flags),
     client_ip_address: IPv4Address,
     your_ip_address: IPv4Address,
     server_ip_address: IPv4Address,
     gateway_ip_address: IPv4Address,
     client_hardware_address: [16]u8,
-    server_host_name: [64]u8,
-    file: [128]u8,
+    server_host_name: [64]u8 = @splat(0),
+    file: [128]u8 = @splat(0),
+    // This field is defined in the 'options' field.
+    magic_cookie: u32 = bootp_magic_cookie,
 
     pub const Flags = packed struct(u16) {
         _: u15 = 0,
@@ -358,4 +360,50 @@ pub const DHCPMessage = extern struct {
 pub const BOOTPOperation = enum(u8) {
     request = 1,
     reply = 2,
+};
+
+/// https://datatracker.ietf.org/doc/html/rfc1497
+pub const bootp_magic_cookie = std.mem.nativeToBig(u32, 0x63_82_53_63);
+
+/// https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
+pub const DHCPOptionCode = enum(u8) {
+    padding = 0,
+    subnet_mask = 1,
+    time_offset = 2,
+    router = 3,
+    time_server = 4,
+    name_server = 5,
+    domain_server = 6,
+    log_server = 7,
+    quotes_server = 8,
+    lpr_server = 9,
+    impress_server = 10,
+    rlp_server = 11,
+    hostname = 12,
+    boot_file_size = 13,
+    merit_dump_size = 14,
+    domain_name = 15,
+    swap_server = 16,
+    root_path = 17,
+    extension_file = 18,
+    address_request = 50,
+    dhcp_msg_type = 53,
+    dhcp_server_id = 54,
+    parameter_list = 55,
+    client_id = 61,
+    end = 255,
+    _,
+};
+
+/// https://www.iana.org/assignments/bootp-dhcp-parameters/bootp-dhcp-parameters.xhtml
+pub const DHCPMessageType = enum(u8) {
+    discover = 1,
+    offer = 2,
+    request = 3,
+    decline = 4,
+    ack = 5,
+    nak = 6,
+    release = 7,
+    inform = 8,
+    _,
 };
