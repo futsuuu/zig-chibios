@@ -153,6 +153,25 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
                 };
 
                 log.info("resolved MAC address is {f}", .{resolved_mac});
+
+                const icmp_req = network.buildICMPEchoRequest(
+                    source_mac,
+                    resolved_mac,
+                    source_ip,
+                    target_ip,
+                    0x1234,
+                    1,
+                );
+
+                log.info("sending ICMP echo request to {f}", .{target_ip});
+                net.sendFrame(&icmp_req);
+
+                const icmp_ok = while (true) {
+                    const len = net.receiveFrame(&recv_buf) orelse continue;
+                    const frame = recv_buf[0..len];
+                    if (network.parseICMPEchoReply(frame, 0x1234, 1)) break true;
+                };
+                log.info("ICMP echo reply received: {}", .{icmp_ok});
             },
             .block => |*blk| {
                 defer blk.deinit();

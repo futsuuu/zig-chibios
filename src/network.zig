@@ -184,27 +184,27 @@ pub const IPv4Header = extern struct {
     };
 
     test Fragment {
-        const bytes: [2]u8 = .{ 0b0100_0000, 0b0000_1010 };
+        const data: [2]u8 = .{ 0b0100_0000, 0b0000_1010 };
         try std.testing.expectEqual(
             Fragment{
                 .offset = 10,
                 .more_fragments = false,
                 .dont_fragment = true,
             },
-            std.mem.bytesToValue(Be(Fragment), &bytes).toNative(),
+            std.mem.bytesToValue(Be(Fragment), &data).toNative(),
         );
     }
 };
 
 /// https://datatracker.ietf.org/doc/html/rfc1071
-pub fn computeChecksum(bytes: []const u8) u16 {
+pub fn computeChecksum(data: []const u8) u16 {
     var sum: u32 = 0;
     var i: usize = 0;
-    while (i + 1 < bytes.len) : (i += 2) {
-        sum += @as(u16, bytes[i]) << 8 | bytes[i + 1];
+    while (i + 1 < data.len) : (i += 2) {
+        sum += @as(u16, data[i]) << 8 | data[i + 1];
     }
-    if (i < bytes.len) {
-        sum += @as(u16, bytes[i]) << 8;
+    if (i < data.len) {
+        sum += @as(u16, data[i]) << 8;
     }
     while (sum >> 16 != 0) {
         sum = (sum & 0xffff) + (sum >> 16);
@@ -245,6 +245,65 @@ pub const ICMPEchoHeader = extern struct {
     identifier: Be(u16) = .fromNative(0),
     sequence: Be(u16) = .fromNative(0),
 };
+
+pub fn buildICMPEchoRequest(
+    source_mac: MACAddress,
+    target_mac: MACAddress,
+    source_ip: IPv4Address,
+    target_ip: IPv4Address,
+    identifier: u16,
+    sequence: u16,
+) [@sizeOf(EthernetHeader) + @sizeOf(IPv4Header) + @sizeOf(ICMPEchoHeader)]u8 {
+    const ethernet_header: EthernetHeader = .{
+        .target_mac_address = target_mac,
+        .source_mac_address = source_mac,
+        .protocol = .fromNative(.IPv4),
+    };
+
+    var ip_header: IPv4Header = .{
+        .meta = .{ .internet_header_length = 5 },
+        .type_of_service = 0,
+        .total_length = .fromNative(@sizeOf(IPv4Header) + @sizeOf(ICMPEchoHeader)),
+        .identification = .fromNative(0),
+        .fragment = .fromNative(.{ .dont_fragment = true }),
+        .time_to_live = 64,
+        .protocol = .ICMP,
+        .header_checksum = .fromNative(0),
+        .source_address = source_ip,
+        .destination_address = target_ip,
+    };
+    const ip_checksum = computeChecksum(std.mem.asBytes(&ip_header));
+    ip_header.header_checksum = .fromNative(ip_checksum);
+
+    var icmp_header: ICMPEchoHeader = .{
+        .type = .echo,
+        .code = 0,
+        .checksum = .fromNative(0),
+        .identifier = .fromNative(identifier),
+        .sequence = .fromNative(sequence),
+    };
+    const icmp_checksum = computeChecksum(std.mem.asBytes(&icmp_header));
+    icmp_header.checksum = .fromNative(icmp_checksum);
+
+    return std.mem.toBytes(ethernet_header) ++ std.mem.toBytes(ip_header) ++ std.mem.toBytes(icmp_header);
+}
+
+pub fn parseICMPEchoReply(frame: []const u8, expected_id: u16, expected_seq: u16) bool {
+    var r: std.Io.Reader = .fixed(frame);
+
+    const ethernet_header = r.takeStructPointer(EthernetHeader) catch return false;
+    if (ethernet_header.protocol.toNative() != .IPv4) return false;
+
+    const ip_header = r.takeStructPointer(IPv4Header) catch return false;
+    if (ip_header.protocol != .ICMP) return false;
+
+    const icmp_header = r.takeStructPointer(ICMPEchoHeader) catch return false;
+    if (icmp_header.type != .echo_reply) return false;
+    if (icmp_header.identifier.toNative() != expected_id) return false;
+    if (icmp_header.sequence.toNative() != expected_seq) return false;
+
+    return true;
+}
 
 /// https://datatracker.ietf.org/doc/html/rfc0768
 pub const UDPHeader = extern struct {
