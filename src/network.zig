@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Be = @import("endian.zig").Big;
+const bytes = @import("bytes.zig");
 
 pub const MacAddress = extern struct {
     octets: [6]u8,
@@ -85,46 +86,49 @@ pub const ArpOperation = enum(u16) {
     _,
 };
 
-pub fn buildArpRequest(
-    our_mac: MacAddress,
-    our_ip: Ipv4Address,
+pub const ArpFrame = struct {
+    source_mac: MacAddress,
+    target_mac: MacAddress,
+    source_ip: Ipv4Address,
     target_ip: Ipv4Address,
-) [@sizeOf(EthernetHeader) + @sizeOf(ArpHeader) + @sizeOf(StaticArpBody(.ethernet, .ipv4))]u8 {
-    const ethernet_header: EthernetHeader = .{
-        .target_mac_address = .broadcast,
-        .source_mac_address = our_mac,
-        .protocol = .fromNative(.arp),
-    };
-    const arp_header: ArpHeader = .{
-        .hardware = .init(.ethernet),
-        .protocol = .fromNative(.ipv4),
-        .hardware_address_size = HardwareType.addressSizeHint(.ethernet).?,
-        .protocol_address_size = EtherType.addressSizeHint(.ipv4).?,
-        .operation = .fromNative(.request),
-    };
-    const arp_body: StaticArpBody(.ethernet, .ipv4) = .{
-        .source_hardware_address = our_mac.octets,
-        .source_protocol_address = our_ip.octets,
-        .target_hardware_address = MacAddress.unspecified.octets,
-        .target_protocol_address = target_ip.octets,
-    };
-    return std.mem.toBytes(ethernet_header) ++ std.mem.toBytes(arp_header) ++ std.mem.toBytes(arp_body);
-}
 
-pub fn parseArpReply(frame: []const u8, our_ip: Ipv4Address) ?MacAddress {
-    var r: std.Io.Reader = .fixed(frame);
+    pub fn writeInto(self: *const ArpFrame, dest: anytype) !void {
+        const w = bytes.wrapWithWriter(dest);
+        try w.writeStruct(EthernetHeader{
+            .target_mac_address = self.target_mac,
+            .source_mac_address = self.source_mac,
+            .protocol = .fromNative(.arp),
+        });
+        try w.writeStruct(ArpHeader{
+            .hardware = .init(.ethernet),
+            .protocol = .fromNative(.ipv4),
+            .hardware_address_size = HardwareType.addressSizeHint(.ethernet).?,
+            .protocol_address_size = EtherType.addressSizeHint(.ipv4).?,
+            .operation = .fromNative(.request),
+        });
+        try w.writeStruct(StaticArpBody(.ethernet, .ipv4){
+            .source_hardware_address = self.source_mac.octets,
+            .source_protocol_address = self.source_ip.octets,
+            .target_hardware_address = self.target_mac.octets,
+            .target_protocol_address = self.target_ip.octets,
+        });
+    }
 
-    const ethernet_header = r.takeStructPointer(EthernetHeader) catch return null;
-    if (ethernet_header.protocol.toNative() != .arp) return null;
-
-    const arp_header = r.takeStructPointer(ArpHeader) catch return null;
-    if (arp_header.operation.toNative() != .reply) return null;
-
-    const arp_body = r.takeStructPointer(StaticArpBody(.ethernet, .ipv4)) catch return null;
-    if (!std.mem.eql(u8, &arp_body.target_protocol_address, &our_ip.octets)) return null;
-
-    return .init(arp_body.source_hardware_address);
-}
+    pub fn readFrom(src: anytype) !?ArpFrame {
+        const r = bytes.wrapWithReader(src);
+        const eth = try r.takeStruct(EthernetHeader);
+        if (eth.protocol.toNative() != .arp) return null;
+        const arp = try r.takeStruct(ArpHeader);
+        _ = arp;
+        const body = try r.takeStruct(StaticArpBody(.ethernet, .ipv4));
+        return .{
+            .source_mac = eth.source_mac_address,
+            .target_mac = eth.target_mac_address,
+            .source_ip = .init(body.source_protocol_address),
+            .target_ip = .init(body.target_protocol_address),
+        };
+    }
+};
 
 pub const Ipv4Address = extern struct {
     octets: [4]u8,
@@ -195,31 +199,38 @@ pub const Ipv4Header = extern struct {
 };
 
 /// https://datatracker.ietf.org/doc/html/rfc1071
-pub fn computeChecksum(data: []const u8) u16 {
-    var sum: u32 = 0;
-    var i: usize = 0;
-    while (i + 1 < data.len) : (i += 2) {
-        sum += @as(u16, data[i]) << 8 | data[i + 1];
-    }
-    if (i < data.len) {
-        sum += @as(u16, data[i]) << 8;
-    }
-    while (sum >> 16 != 0) {
-        sum = (sum & 0xffff) + (sum >> 16);
-    }
-    return ~@as(u16, @truncate(sum));
-}
+pub const Checksum = struct {
+    sum: u32 = 0,
+    clk: bool = true,
 
-test computeChecksum {
-    try std.testing.expectEqual(
-        ~@as(u16, 0xddf2),
-        computeChecksum(&.{
-            0x00, 0x01,
-            0xf2, 0x03,
-            0xf4, 0xf5,
-            0xf6, 0xf7,
-        }),
-    );
+    pub const init: Checksum = .{};
+
+    pub fn writeAll(self: *Checksum, data: []const u8) void {
+        for (data) |byte| {
+            self.sum += @as(u16, byte) << (@as(u4, @intFromBool(self.clk)) * 8);
+            self.clk = !self.clk;
+        }
+    }
+
+    pub fn compute(self: Checksum) u16 {
+        var sum = self.sum;
+        while (sum >> 16 != 0) {
+            sum = (sum & 0xffff) + (sum >> 16);
+        }
+        return ~@as(u16, @truncate(sum));
+    }
+};
+
+test Checksum {
+    var cs: Checksum = .init;
+    const w = bytes.wrapWithWriter(&cs);
+    w.writeAll(&.{
+        0x00, 0x01,
+        0xf2, 0x03,
+        0xf4, 0xf5,
+        0xf6, 0xf7,
+    }) catch comptime unreachable;
+    try std.testing.expectEqual(~@as(u16, 0xddf2), cs.compute());
 }
 
 pub const IcmpType = enum(u8) {
@@ -244,64 +255,83 @@ pub const IcmpEchoHeader = extern struct {
     sequence: Be(u16) = .fromNative(0),
 };
 
-pub fn buildIcmpEchoRequest(
+pub const IcmpEchoFrame = struct {
     source_mac: MacAddress,
     target_mac: MacAddress,
     source_ip: Ipv4Address,
     target_ip: Ipv4Address,
     identifier: u16,
     sequence: u16,
-) [@sizeOf(EthernetHeader) + @sizeOf(Ipv4Header) + @sizeOf(IcmpEchoHeader)]u8 {
-    const ethernet_header: EthernetHeader = .{
-        .target_mac_address = target_mac,
-        .source_mac_address = source_mac,
-        .protocol = .fromNative(.ipv4),
-    };
+    data: []const u8,
 
-    var ip_header: Ipv4Header = .{
-        .meta = .{ .internet_header_length = 5 },
-        .type_of_service = 0,
-        .total_length = .fromNative(@sizeOf(Ipv4Header) + @sizeOf(IcmpEchoHeader)),
-        .identification = .fromNative(0),
-        .fragment = .fromNative(.{ .dont_fragment = true }),
-        .time_to_live = 64,
-        .protocol = .icmp,
-        .header_checksum = .fromNative(0),
-        .source_address = source_ip,
-        .destination_address = target_ip,
-    };
-    const ip_checksum = computeChecksum(std.mem.asBytes(&ip_header));
-    ip_header.header_checksum = .fromNative(ip_checksum);
+    pub fn writeInto(self: *const IcmpEchoFrame, dest: anytype) !void {
+        const w = bytes.wrapWithWriter(dest);
+        try w.writeStruct(EthernetHeader{
+            .target_mac_address = self.target_mac,
+            .source_mac_address = self.source_mac,
+            .protocol = .fromNative(.ipv4),
+        });
+        try self.writeIpHeader(dest);
+        try self.writeIcmpPacket(dest);
+    }
 
-    var icmp_header: IcmpEchoHeader = .{
-        .type = .echo,
-        .code = 0,
-        .checksum = .fromNative(0),
-        .identifier = .fromNative(identifier),
-        .sequence = .fromNative(sequence),
-    };
-    const icmp_checksum = computeChecksum(std.mem.asBytes(&icmp_header));
-    icmp_header.checksum = .fromNative(icmp_checksum);
+    pub fn readFrom(src: anytype) !?IcmpEchoFrame {
+        const r = bytes.wrapWithReader(src);
+        const eth = try r.takeStruct(EthernetHeader);
+        if (eth.protocol.toNative() != .ipv4) return null;
+        const ip = try r.takeStruct(Ipv4Header);
+        if (ip.protocol != .icmp) return null;
+        const icmp = try r.takeStruct(IcmpEchoHeader);
+        if (icmp.type != .echo_reply) return null;
+        return .{
+            .source_mac = eth.source_mac_address,
+            .target_mac = eth.target_mac_address,
+            .source_ip = ip.source_address,
+            .target_ip = ip.destination_address,
+            .identifier = icmp.identifier.toNative(),
+            .sequence = icmp.sequence.toNative(),
+            .data = try r.remaining(),
+        };
+    }
 
-    return std.mem.toBytes(ethernet_header) ++ std.mem.toBytes(ip_header) ++ std.mem.toBytes(icmp_header);
-}
+    fn writeIpHeader(self: *const IcmpEchoFrame, dest: anytype) !void {
+        const checksum: u16 = if (@TypeOf(dest) == *Checksum) 0 else b: {
+            var cs: Checksum = .init;
+            self.writeIpHeader(&cs) catch comptime unreachable;
+            break :b cs.compute();
+        };
+        const w = bytes.wrapWithWriter(dest);
+        try w.writeStruct(Ipv4Header{
+            .meta = .{ .internet_header_length = 5 },
+            .type_of_service = 0,
+            .total_length = .fromNative(@sizeOf(Ipv4Header) + @sizeOf(IcmpEchoHeader) + @as(u16, @intCast(self.data.len))),
+            .identification = .fromNative(0),
+            .fragment = .fromNative(.{ .dont_fragment = true }),
+            .time_to_live = 64,
+            .protocol = .icmp,
+            .header_checksum = .fromNative(checksum),
+            .source_address = self.source_ip,
+            .destination_address = self.target_ip,
+        });
+    }
 
-pub fn parseIcmpEchoReply(frame: []const u8, expected_id: u16, expected_seq: u16) bool {
-    var r: std.Io.Reader = .fixed(frame);
-
-    const ethernet_header = r.takeStructPointer(EthernetHeader) catch return false;
-    if (ethernet_header.protocol.toNative() != .ipv4) return false;
-
-    const ip_header = r.takeStructPointer(Ipv4Header) catch return false;
-    if (ip_header.protocol != .icmp) return false;
-
-    const icmp_header = r.takeStructPointer(IcmpEchoHeader) catch return false;
-    if (icmp_header.type != .echo_reply) return false;
-    if (icmp_header.identifier.toNative() != expected_id) return false;
-    if (icmp_header.sequence.toNative() != expected_seq) return false;
-
-    return true;
-}
+    fn writeIcmpPacket(self: *const IcmpEchoFrame, dest: anytype) !void {
+        const checksum: u16 = if (@TypeOf(dest) == *Checksum) 0 else b: {
+            var cs: Checksum = .init;
+            self.writeIcmpPacket(&cs) catch comptime unreachable;
+            break :b cs.compute();
+        };
+        const w = bytes.wrapWithWriter(dest);
+        try w.writeStruct(IcmpEchoHeader{
+            .type = .echo,
+            .code = 0,
+            .checksum = .fromNative(checksum),
+            .identifier = .fromNative(self.identifier),
+            .sequence = .fromNative(self.sequence),
+        });
+        try w.writeAll(self.data);
+    }
+};
 
 /// https://datatracker.ietf.org/doc/html/rfc0768
 pub const UdpHeader = extern struct {

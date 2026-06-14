@@ -10,6 +10,8 @@ pub const sbi = @import("sbi.zig");
 pub const sv32 = @import("sv32.zig");
 pub const trap = @import("trap.zig");
 pub const virtio = @import("virtio.zig");
+const PagedBumpAllocator = @import("PagedBumpAllocator.zig");
+const bytes = @import("bytes.zig");
 
 comptime {
     _ = @import("start.zig");
@@ -140,38 +142,59 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
                 const source_ip: network.Ipv4Address = .init(.{ 10, 0, 2, 15 });
                 const target_ip: network.Ipv4Address = .init(.{ 10, 0, 2, 2 });
 
-                const arp_req = network.buildArpRequest(source_mac, source_ip, target_ip);
+                var bump: PagedBumpAllocator = .init;
+                defer bump.deinit();
 
-                log.info("sending ARP request for {f}", .{target_ip});
-                net.sendFrame(&arp_req);
+                var write_buf: bytes.alloc.Writable = .init(bump.allocator());
+                defer write_buf.deinit();
 
                 var recv_buf: [256]u8 = undefined;
-                const resolved_mac = while (true) {
-                    const len = net.receiveFrame(&recv_buf) orelse continue;
-                    const frame = recv_buf[0..len];
-                    if (network.parseArpReply(frame, source_ip)) |mac| break mac;
+
+                const resolved_mac: network.MacAddress = b: {
+                    defer write_buf.clear();
+                    const arp_frame: network.ArpFrame = .{
+                        .source_mac = source_mac,
+                        .target_mac = .broadcast,
+                        .source_ip = source_ip,
+                        .target_ip = target_ip,
+                    };
+                    try arp_frame.writeInto(&write_buf);
+                    log.info("sending ARP request for {f}", .{target_ip});
+                    net.sendFrame(write_buf.written());
+
+                    while (true) {
+                        const len = net.receiveFrame(&recv_buf) orelse continue;
+                        var read_buf: bytes.fixed.Readable = .init(recv_buf[0..len]);
+                        var arp_reply = try network.ArpFrame.readFrom(&read_buf) orelse continue;
+                        if (!std.mem.eql(u8, &arp_reply.target_ip.octets, &source_ip.octets)) continue;
+                        break :b arp_reply.source_mac;
+                    }
                 };
 
-                log.info("resolved MAC address is {f}", .{resolved_mac});
+                {
+                    defer write_buf.clear();
+                    const icmp_req: network.IcmpEchoFrame = .{
+                        .source_mac = source_mac,
+                        .target_mac = resolved_mac,
+                        .source_ip = source_ip,
+                        .target_ip = target_ip,
+                        .identifier = 0x1234,
+                        .sequence = 1,
+                        .data = "hello world",
+                    };
+                    try icmp_req.writeInto(&write_buf);
+                    log.info("sending ICMP echo request to {f}", .{target_ip});
+                    net.sendFrame(write_buf.written());
 
-                const icmp_req = network.buildIcmpEchoRequest(
-                    source_mac,
-                    resolved_mac,
-                    source_ip,
-                    target_ip,
-                    0x1234,
-                    1,
-                );
-
-                log.info("sending ICMP echo request to {f}", .{target_ip});
-                net.sendFrame(&icmp_req);
-
-                const icmp_ok = while (true) {
-                    const len = net.receiveFrame(&recv_buf) orelse continue;
-                    const frame = recv_buf[0..len];
-                    if (network.parseIcmpEchoReply(frame, 0x1234, 1)) break true;
-                };
-                log.info("ICMP echo reply received: {}", .{icmp_ok});
+                    const icmp_data = while (true) {
+                        const len = net.receiveFrame(&recv_buf) orelse continue;
+                        var read_buf: bytes.fixed.Readable = .init(recv_buf[0..len]);
+                        const icmp_reply = try network.IcmpEchoFrame.readFrom(&read_buf) orelse continue;
+                        if (icmp_reply.identifier != 0x1234 or icmp_reply.sequence != 1) continue;
+                        break icmp_reply.data;
+                    };
+                    log.info("ICMP echo reply received: {s}", .{icmp_data});
+                }
             },
             .block => |*blk| {
                 defer blk.deinit();
@@ -218,5 +241,4 @@ fn procBEntry() void {
 
 comptime {
     std.testing.refAllDecls(@This());
-    _ = @import("PagedBumpAllocator.zig");
 }
