@@ -3,7 +3,9 @@ const std = @import("std");
 const PagedBumpAllocator = @This();
 
 test PagedBumpAllocator {
-    var bump: PagedBumpAllocator = .init;
+    var bump: PagedBumpAllocator = .{
+        .page_allocator = std.testing.allocator,
+    };
     defer bump.deinit();
     const a = bump.allocator();
     try std.heap.testAllocator(a);
@@ -13,11 +15,10 @@ test PagedBumpAllocator {
 }
 
 page_allocator: std.mem.Allocator,
-current: Node,
+current: Node = .nil,
 
 pub const init: PagedBumpAllocator = .{
     .page_allocator = std.heap.page_allocator,
-    .current = .nil,
 };
 
 pub fn deinit(self: PagedBumpAllocator) void {
@@ -74,9 +75,10 @@ const Node = struct {
         var current = self;
         while (current.getParent()) |parent_ptr| {
             const parent = parent_ptr.*;
-            page_allocator.free(self.fba.buffer);
+            page_allocator.free(current.fba.buffer);
             current = parent;
         }
+        page_allocator.free(current.fba.buffer);
     }
 
     fn getParent(self: Node) ?*Node {
