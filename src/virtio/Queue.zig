@@ -1,7 +1,8 @@
 const std = @import("std");
 const log = std.log.scoped(.virtio_queue);
 
-const Le = @import("../endian.zig").Little;
+const Le = @import("shared").Le;
+
 const virtio = @import("../virtio.zig");
 
 const Queue = @This();

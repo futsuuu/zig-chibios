@@ -1,14 +1,13 @@
 const std = @import("std");
 const log = std.log.scoped(.virtio_net);
 
-const Le = @import("../endian.zig").Little;
-const PagedBumpAllocator = @import("../PagedBumpAllocator.zig");
-const bytes = @import("../bytes.zig");
-const network = @import("../network.zig");
+const shared = @import("shared");
+const Le = shared.Le;
+
 const virtio = @import("../virtio.zig");
 
 pub const Driver = struct {
-    bump: PagedBumpAllocator,
+    bump: shared.heap.PagedBumpAllocator,
     receiveq1: virtio.Queue,
     transmitq1: virtio.Queue,
     register: *virtio.mmio.Register,
@@ -34,7 +33,7 @@ pub const Driver = struct {
         log.debug("driver features: {f}", .{features});
         try register.writeDriverFeatures(Feature, features);
 
-        var bump: PagedBumpAllocator = .init;
+        var bump: shared.heap.PagedBumpAllocator = .init;
         errdefer bump.deinit();
 
         var receiveq1 = try virtio.Queue.init(bump.allocator(), 0, register) orelse {
@@ -73,7 +72,7 @@ pub const Driver = struct {
         self.bump.deinit();
     }
 
-    pub fn macAddress(self: *Driver) ?network.MacAddress {
+    pub fn macAddress(self: *Driver) ?shared.net.MacAddress {
         if (self.features.has(.{ .device = .mac_address })) {
             const config = self.register.config(Config);
             return config.mac_address;
@@ -108,7 +107,7 @@ pub const Driver = struct {
         const packet_len = desc.len.toNative();
         const header_len = PacketHeader.size(&self.features);
         std.debug.assert(header_len < packet_len);
-        const w = bytes.wrapWithWriter(dest);
+        const w = shared.bytes.wrapWithWriter(dest);
         try w.writeAll(buf[header_len..packet_len]);
         var chain = self.receiveq1.append(.writable, buf);
         _ = chain.finish();
@@ -116,7 +115,7 @@ pub const Driver = struct {
 };
 
 pub const Config = extern struct {
-    mac_address: network.MacAddress,
+    mac_address: shared.net.MacAddress,
     status: Le(Status),
     max_virtqueue_pairs: Le(u16),
     mtu: Le(u16),

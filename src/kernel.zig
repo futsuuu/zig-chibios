@@ -2,16 +2,14 @@ const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.kernel);
 
+const shared = @import("shared");
+
 pub const Fdt = @import("Fdt.zig");
 pub const Process = @import("Process.zig");
-pub const buddy_allocator = @import("buddy_allocator.zig");
-pub const network = @import("network.zig");
 pub const sbi = @import("sbi.zig");
 pub const sv32 = @import("sv32.zig");
 pub const trap = @import("trap.zig");
 pub const virtio = @import("virtio.zig");
-const PagedBumpAllocator = @import("PagedBumpAllocator.zig");
-const bytes = @import("bytes.zig");
 
 comptime {
     _ = @import("start.zig");
@@ -70,7 +68,7 @@ fn debugUnlockStderr(_: ?*anyopaque) void {
 
 pub const os = struct {
     pub const heap = struct {
-        const PageAllocator = buddy_allocator.BuddyAllocator(.{});
+        const PageAllocator = shared.heap.BuddyAllocator(.{});
 
         pub fn initPageAllocator() std.mem.Allocator.Error!void {
             const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
@@ -134,25 +132,26 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
             continue;
         };
         switch (driver) {
-            .network => |*net| {
-                defer net.deinit();
+            .network => |*virtio_net| {
+                defer virtio_net.deinit();
 
-                const source_mac: network.MacAddress = net.macAddress() orelse .init(.{ 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 });
+                const default_mac: shared.net.MacAddress = .init(.{ 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 });
+                const source_mac: shared.net.MacAddress = virtio_net.macAddress() orelse default_mac;
                 log.info("our MAC address is {f}", .{source_mac});
-                const source_ip: network.Ipv4Address = .init(.{ 10, 0, 2, 15 });
-                const target_ip: network.Ipv4Address = .init(.{ 10, 0, 2, 2 });
+                const source_ip: shared.net.Ipv4Address = .init(.{ 10, 0, 2, 15 });
+                const target_ip: shared.net.Ipv4Address = .init(.{ 10, 0, 2, 2 });
 
-                var bump: PagedBumpAllocator = .init;
+                var bump: shared.heap.PagedBumpAllocator = .init;
                 defer bump.deinit();
 
-                var send_buf: bytes.alloc.Writable = .init(bump.allocator());
+                var send_buf: shared.bytes.alloc.Writable = .init(bump.allocator());
                 defer send_buf.deinit();
-                var recv_buf: bytes.alloc.Writable = .init(bump.allocator());
+                var recv_buf: shared.bytes.alloc.Writable = .init(bump.allocator());
                 defer recv_buf.deinit();
 
-                const resolved_mac: network.MacAddress = b: {
+                const resolved_mac: shared.net.MacAddress = b: {
                     defer send_buf.clear();
-                    const arp_frame: network.ArpFrame = .{
+                    const arp_frame: shared.net.ArpFrame = .{
                         .source_mac = source_mac,
                         .target_mac = .broadcast,
                         .source_ip = source_ip,
@@ -160,13 +159,13 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
                     };
                     try arp_frame.writeInto(&send_buf);
                     log.info("sending ARP request for {f}", .{target_ip});
-                    net.sendFrame(send_buf.written());
+                    virtio_net.sendFrame(send_buf.written());
 
                     while (true) {
                         recv_buf.clear();
-                        try net.receiveFrame(&recv_buf);
-                        var frame: bytes.fixed.Readable = .init(recv_buf.written());
-                        var arp_reply = try network.ArpFrame.readFrom(&frame) orelse continue;
+                        try virtio_net.receiveFrame(&recv_buf);
+                        var frame: shared.bytes.fixed.Readable = .init(recv_buf.written());
+                        var arp_reply = try shared.net.ArpFrame.readFrom(&frame) orelse continue;
                         if (!std.mem.eql(u8, &arp_reply.target_ip.octets, &source_ip.octets)) continue;
                         break :b arp_reply.source_mac;
                     }
@@ -174,7 +173,7 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
 
                 {
                     defer send_buf.clear();
-                    const icmp_req: network.IcmpEchoFrame = .{
+                    const icmp_req: shared.net.IcmpEchoFrame = .{
                         .source_mac = source_mac,
                         .target_mac = resolved_mac,
                         .source_ip = source_ip,
@@ -185,26 +184,26 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
                     };
                     try icmp_req.writeInto(&send_buf);
                     log.info("sending ICMP echo request to {f}", .{target_ip});
-                    net.sendFrame(send_buf.written());
+                    virtio_net.sendFrame(send_buf.written());
 
                     const icmp_data = while (true) {
                         recv_buf.clear();
-                        try net.receiveFrame(&recv_buf);
-                        var frame: bytes.fixed.Readable = .init(recv_buf.written());
-                        const icmp_reply = try network.IcmpEchoFrame.readFrom(&frame) orelse continue;
+                        try virtio_net.receiveFrame(&recv_buf);
+                        var frame: shared.bytes.fixed.Readable = .init(recv_buf.written());
+                        const icmp_reply = try shared.net.IcmpEchoFrame.readFrom(&frame) orelse continue;
                         if (icmp_reply.identifier != 0x1234 or icmp_reply.sequence != 1) continue;
                         break icmp_reply.data;
                     };
                     log.info("ICMP echo reply received: {s}", .{icmp_data});
                 }
             },
-            .block => |*blk| {
-                defer blk.deinit();
+            .block => |*virtio_blk| {
+                defer virtio_blk.deinit();
                 log.info("writing message in {s}", .{fdt_node.name});
                 var buf = std.mem.zeroes([512]u8);
-                try blk.request(.read, &buf, 0);
+                try virtio_blk.request(.read, &buf, 0);
                 @memcpy(buf[0..].ptr, "hello world!");
-                try blk.request(.write, &buf, 0);
+                try virtio_blk.request(.write, &buf, 0);
             },
         }
     }

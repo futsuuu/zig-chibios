@@ -3,7 +3,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.virtio_mmio);
 
-const Le = @import("../endian.zig").Little;
+const Le = @import("shared").Le;
+
 const virtio = @import("../virtio.zig");
 
 pub const RegisterHeader = struct {

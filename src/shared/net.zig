@@ -435,3 +435,7 @@ pub const DhcpMessageType = enum(u8) {
     inform = 8,
     _,
 };
+
+comptime {
+    std.testing.refAllDecls(@This());
+}

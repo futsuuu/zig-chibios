@@ -1,12 +1,13 @@
 const std = @import("std");
 const log = std.log.scoped(.virtio_blk);
 
-const Le = @import("../endian.zig").Little;
-const PagedBumpAllocator = @import("../PagedBumpAllocator.zig");
+const shared = @import("shared");
+const Le = shared.Le;
+
 const virtio = @import("../virtio.zig");
 
 pub const Driver = struct {
-    bump: PagedBumpAllocator,
+    bump: shared.heap.PagedBumpAllocator,
     requestq1: virtio.Queue,
     register: *virtio.mmio.Register,
     features: virtio.feature.Set(Feature),
@@ -29,7 +30,7 @@ pub const Driver = struct {
         log.debug("driver features: {f}", .{features});
         try register.writeDriverFeatures(Feature, features);
 
-        var bump: PagedBumpAllocator = .init;
+        var bump: shared.heap.PagedBumpAllocator = .init;
         errdefer bump.deinit();
 
         const requestq1 = try virtio.Queue.init(bump.allocator(), 0, register) orelse {

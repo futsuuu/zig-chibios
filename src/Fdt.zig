@@ -1,7 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.fdt);
 
-const Be = @import("endian.zig").Big;
+const Be = @import("shared").Be;
 
 const Fdt = @This();
 

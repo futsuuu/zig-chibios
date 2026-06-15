@@ -10,6 +10,22 @@ pub fn build(b: *std.Build) void {
         .preferred_optimize_mode = .ReleaseSmall,
     });
 
+    const run_step = b.step("run", "Run the kernel with QEMU");
+    const test_step = b.step("test", "Run tests");
+
+    const shared_mod = shared: {
+        const mod = b.createModule(.{
+            .root_source_file = b.path("src/shared/root.zig"),
+            .target = b.graph.host,
+        });
+        const shared_tests = b.addTest(.{
+            .name = "test-shared",
+            .root_module = mod,
+        });
+        test_step.dependOn(&b.addRunArtifact(shared_tests).step);
+        break :shared mod;
+    };
+
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/kernel.zig"),
         .target = target,
@@ -18,6 +34,7 @@ pub fn build(b: *std.Build) void {
         .strip = false,
         .stack_protector = false,
     });
+    kernel_mod.addImport("shared", shared_mod);
     const kernel = b.addExecutable(.{
         .name = "kernel.elf",
         .root_module = kernel_mod,
@@ -25,7 +42,6 @@ pub fn build(b: *std.Build) void {
     kernel.setLinkerScript(b.path("src/kernel.ld"));
     b.installArtifact(kernel);
 
-    const run_step = b.step("run", "Run the kernel with QEMU");
     const qemu = switch (target.result.cpu.arch) {
         .riscv32 => "qemu-system-riscv32",
         .riscv64 => "qemu-system-riscv64",
@@ -63,7 +79,6 @@ pub fn build(b: *std.Build) void {
     run_cmd.step.dependOn(b.getInstallStep());
     run_step.dependOn(&run_cmd.step);
 
-    const test_step = b.step("test", "Run tests");
     for ([_]struct {
         name: []const u8,
         optimize: std.builtin.OptimizeMode,
@@ -94,6 +109,7 @@ pub fn build(b: *std.Build) void {
             .root_module = kernel_tests_mod,
             .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
         });
+        kernel_tests_mod.addImport("shared", shared_mod);
         kernel_tests_mod.addImport("kernel", kernel_tests_mod); // needed for custom test runner
         kernel_tests.setLinkerScript(b.path("src/kernel.ld"));
         kernel_tests.setExecCmd(&.{

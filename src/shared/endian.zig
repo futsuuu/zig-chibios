@@ -3,6 +3,7 @@ const std = @import("std");
 pub fn Big(T: type) type {
     return Converter(T, .big);
 }
+
 pub fn Little(T: type) type {
     return Converter(T, .little);
 }

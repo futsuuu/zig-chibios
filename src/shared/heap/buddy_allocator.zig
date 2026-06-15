@@ -3,7 +3,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const panic = std.debug.panic;
-const log = std.log.scoped(.buddy_allocator);
 
 pub const Config = struct {
     page_size: comptime_int = std.heap.pageSize(),
@@ -129,9 +128,12 @@ pub fn BuddyAllocator(config: Config) type {
 }
 
 test BuddyAllocator {
-    const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
-    const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
-    const buf = free_ram[0 .. free_ram_end - free_ram];
+    const buf = try std.testing.allocator.alignedAlloc(
+        u8,
+        .fromByteUnits(std.heap.pageSize()),
+        64 * 1024 * 1024, // 64MiB
+    );
+    defer std.testing.allocator.free(buf);
     var buddy_allocator: BuddyAllocator(.{}) = try .init(buf);
     const allocator = buddy_allocator.allocator();
     try std.heap.testAllocator(allocator);
@@ -307,6 +309,7 @@ const Blocks = struct {
     fn capacity(self: Blocks) usize {
         return self.bitset.capacity();
     }
+
     fn count(self: Blocks, state: BlockState) usize {
         return switch (state) {
             .used => self.capacity() - self.bitset.count(),
@@ -376,8 +379,9 @@ const Blocks = struct {
             },
         );
     }
+
     test parentRange {
-        var buf: [10]u8 = undefined;
+        var buf: [16]u8 = undefined;
         var fba: std.heap.FixedBufferAllocator = .init(&buf);
         var blocks: Blocks = try .init(fba.allocator(), 16);
         try std.testing.expectEqual(Range.init(2, 3), blocks.parentRange(.used, Range.init(4, 6).?));
