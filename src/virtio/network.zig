@@ -3,6 +3,7 @@ const log = std.log.scoped(.virtio_net);
 
 const Le = @import("../endian.zig").Little;
 const PagedBumpAllocator = @import("../PagedBumpAllocator.zig");
+const bytes = @import("../bytes.zig");
 const network = @import("../network.zig");
 const virtio = @import("../virtio.zig");
 
@@ -98,7 +99,7 @@ pub const Driver = struct {
         _ = self.transmitq1.waitUsed();
     }
 
-    pub fn receiveFrame(self: *Driver, out_buf: []u8) ?usize {
+    pub fn receiveFrame(self: *Driver, dest: anytype) !void {
         const desc = self.receiveq1.waitUsed();
         const addr = desc.addr.toNative();
         const buf = for (self.receive_bufs) |b| {
@@ -106,12 +107,11 @@ pub const Driver = struct {
         } else unreachable;
         const packet_len = desc.len.toNative();
         const header_len = PacketHeader.size(&self.features);
-        if (packet_len <= header_len) return null;
-        const frame_len = @min(packet_len - header_len, out_buf.len);
-        @memcpy(out_buf[0..frame_len], buf[header_len..packet_len]);
+        std.debug.assert(header_len < packet_len);
+        const w = bytes.wrapWithWriter(dest);
+        try w.writeAll(buf[header_len..packet_len]);
         var chain = self.receiveq1.append(.writable, buf);
         _ = chain.finish();
-        return frame_len;
     }
 };
 

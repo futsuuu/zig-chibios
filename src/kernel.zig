@@ -145,34 +145,35 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
                 var bump: PagedBumpAllocator = .init;
                 defer bump.deinit();
 
-                var write_buf: bytes.alloc.Writable = .init(bump.allocator());
-                defer write_buf.deinit();
-
-                var recv_buf: [256]u8 = undefined;
+                var send_buf: bytes.alloc.Writable = .init(bump.allocator());
+                defer send_buf.deinit();
+                var recv_buf: bytes.alloc.Writable = .init(bump.allocator());
+                defer recv_buf.deinit();
 
                 const resolved_mac: network.MacAddress = b: {
-                    defer write_buf.clear();
+                    defer send_buf.clear();
                     const arp_frame: network.ArpFrame = .{
                         .source_mac = source_mac,
                         .target_mac = .broadcast,
                         .source_ip = source_ip,
                         .target_ip = target_ip,
                     };
-                    try arp_frame.writeInto(&write_buf);
+                    try arp_frame.writeInto(&send_buf);
                     log.info("sending ARP request for {f}", .{target_ip});
-                    net.sendFrame(write_buf.written());
+                    net.sendFrame(send_buf.written());
 
                     while (true) {
-                        const len = net.receiveFrame(&recv_buf) orelse continue;
-                        var read_buf: bytes.fixed.Readable = .init(recv_buf[0..len]);
-                        var arp_reply = try network.ArpFrame.readFrom(&read_buf) orelse continue;
+                        recv_buf.clear();
+                        try net.receiveFrame(&recv_buf);
+                        var frame: bytes.fixed.Readable = .init(recv_buf.written());
+                        var arp_reply = try network.ArpFrame.readFrom(&frame) orelse continue;
                         if (!std.mem.eql(u8, &arp_reply.target_ip.octets, &source_ip.octets)) continue;
                         break :b arp_reply.source_mac;
                     }
                 };
 
                 {
-                    defer write_buf.clear();
+                    defer send_buf.clear();
                     const icmp_req: network.IcmpEchoFrame = .{
                         .source_mac = source_mac,
                         .target_mac = resolved_mac,
@@ -182,14 +183,15 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
                         .sequence = 1,
                         .data = "hello world",
                     };
-                    try icmp_req.writeInto(&write_buf);
+                    try icmp_req.writeInto(&send_buf);
                     log.info("sending ICMP echo request to {f}", .{target_ip});
-                    net.sendFrame(write_buf.written());
+                    net.sendFrame(send_buf.written());
 
                     const icmp_data = while (true) {
-                        const len = net.receiveFrame(&recv_buf) orelse continue;
-                        var read_buf: bytes.fixed.Readable = .init(recv_buf[0..len]);
-                        const icmp_reply = try network.IcmpEchoFrame.readFrom(&read_buf) orelse continue;
+                        recv_buf.clear();
+                        try net.receiveFrame(&recv_buf);
+                        var frame: bytes.fixed.Readable = .init(recv_buf.written());
+                        const icmp_reply = try network.IcmpEchoFrame.readFrom(&frame) orelse continue;
                         if (icmp_reply.identifier != 0x1234 or icmp_reply.sequence != 1) continue;
                         break icmp_reply.data;
                     };
