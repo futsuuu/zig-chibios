@@ -27,20 +27,34 @@ pub fn build(b: *std.Build) void {
     };
 
     const kernel_mod = b.createModule(.{
-        .root_source_file = b.path("src/kernel.zig"),
+        .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
         .no_builtin = true,
         .strip = false,
         .stack_protector = false,
+        .imports = &.{
+            .{ .name = "shared", .module = shared_mod },
+        },
     });
-    kernel_mod.addImport("shared", shared_mod);
-    const kernel = b.addExecutable(.{
+
+    const kernel_elf = b.addExecutable(.{
         .name = "kernel.elf",
-        .root_module = kernel_mod,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .no_builtin = true,
+            .strip = false,
+            .stack_protector = false,
+            .imports = &.{
+                .{ .name = "kernel", .module = kernel_mod },
+                .{ .name = "shared", .module = shared_mod },
+            },
+        }),
     });
-    kernel.setLinkerScript(b.path("src/kernel.ld"));
-    b.installArtifact(kernel);
+    kernel_elf.setLinkerScript(b.path("src/kernel.ld"));
+    b.installArtifact(kernel_elf);
 
     const qemu = switch (target.result.cpu.arch) {
         .riscv32 => "qemu-system-riscv32",
@@ -75,7 +89,7 @@ pub fn build(b: *std.Build) void {
         "virtio-net-device,netdev=net0,packed=true",
         "-kernel",
     });
-    run_cmd.addArtifactArg(kernel);
+    run_cmd.addArtifactArg(kernel_elf);
     run_cmd.step.dependOn(b.getInstallStep());
     run_step.dependOn(&run_cmd.step);
 
@@ -97,19 +111,21 @@ pub fn build(b: *std.Build) void {
         },
     }) |opts| {
         const kernel_tests_mod = b.createModule(.{
-            .root_source_file = b.path("src/kernel.zig"),
+            .root_source_file = b.path("src/root.zig"),
             .target = target,
             .optimize = opts.optimize,
             .no_builtin = true,
             .strip = false,
             .stack_protector = false,
+            .imports = &.{
+                .{ .name = "shared", .module = shared_mod },
+            },
         });
         const kernel_tests = b.addTest(.{
             .name = opts.name,
             .root_module = kernel_tests_mod,
             .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
         });
-        kernel_tests_mod.addImport("shared", shared_mod);
         kernel_tests_mod.addImport("kernel", kernel_tests_mod); // needed for custom test runner
         kernel_tests.setLinkerScript(b.path("src/kernel.ld"));
         kernel_tests.setExecCmd(&.{

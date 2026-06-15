@@ -1,107 +1,15 @@
-const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.kernel);
 
+const kernel = @import("kernel");
 const shared = @import("shared");
 
-pub const Fdt = @import("Fdt.zig");
-pub const Process = @import("Process.zig");
-pub const sbi = @import("sbi.zig");
-pub const sv32 = @import("sv32.zig");
-pub const trap = @import("trap.zig");
-pub const virtio = @import("virtio.zig");
+pub const panic = kernel.panic;
+pub const std_options = kernel.std_options;
+pub const std_options_debug_io = kernel.std_options_debug_io;
+pub const os = kernel.os;
 
-comptime {
-    _ = @import("start.zig");
-}
-
-pub const panic = std.debug.FullPanic(struct {
-    fn panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
-        @branchHint(.cold);
-        printPanicInfo(msg, first_trace_addr);
-        while (true) asm volatile ("wfi");
-    }
-}.panic);
-
-pub const std_options: std.Options = .{
-    .page_size_min = sv32.page_size,
-    .page_size_max = sv32.page_size,
-};
-
-pub const std_options_debug_io: std.Io = .{
-    .userdata = null,
-    .vtable = &debug_vtable,
-};
-
-const debug_vtable: std.Io.VTable = blk: {
-    var vtable: std.Io.VTable = std.Io.failing.vtable.*;
-    vtable.swapCancelProtection = debugSwapCancelProtection;
-    vtable.lockStderr = debugLockStderr;
-    vtable.unlockStderr = debugUnlockStderr;
-    break :blk vtable;
-};
-
-var debug_file_writer: std.Io.File.Writer = .{
-    .io = undefined,
-    .file = .{
-        .handle = {},
-        .flags = .{ .nonblocking = false },
-    },
-    .interface = sbi.debug_console.writer(),
-};
-
-fn debugSwapCancelProtection(_: ?*anyopaque, _: std.Io.CancelProtection) std.Io.CancelProtection {
-    return .blocked;
-}
-
-fn debugLockStderr(_: ?*anyopaque, terminal_mode: ?std.Io.Terminal.Mode) std.Io.Cancelable!std.Io.LockedStderr {
-    return .{
-        .file_writer = &debug_file_writer,
-        .terminal_mode = terminal_mode orelse .escape_codes,
-    };
-}
-
-fn debugUnlockStderr(_: ?*anyopaque) void {
-    debug_file_writer.interface.flush() catch {};
-    debug_file_writer.interface.buffer = &.{};
-}
-
-pub const os = struct {
-    pub const heap = struct {
-        const PageAllocator = shared.heap.BuddyAllocator(.{});
-
-        pub fn initPageAllocator() std.mem.Allocator.Error!void {
-            const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
-            const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
-            const buf = free_ram[0 .. free_ram_end - free_ram];
-            instance = try .init(buf);
-        }
-
-        var instance: PageAllocator = undefined;
-        pub const page_allocator: std.mem.Allocator = .{
-            .ptr = &instance,
-            .vtable = &PageAllocator.vtable,
-        };
-    };
-};
-
-pub fn printPanicInfo(msg: []const u8, first_trace_addr: ?usize) void {
-    @branchHint(.cold);
-    log.err("PANIC: {s}", .{msg});
-    _ = first_trace_addr;
-    // FIXME: replace StackIterator with captureCurrentStackTrace
-    // var iter: std.debug.StackIterator = .init(first_trace_addr, null);
-    // var index: usize = 0;
-    // while (iter.next()) |addr| : (index += 1) {
-    //     switch (builtin.target.ptrBitWidth()) {
-    //         32 => log.err("{:0>3}: 0x{x:0>8}", .{ index, addr }),
-    //         64 => log.err("{:0>3}: 0x{x:0>16}", .{ index, addr }),
-    //         else => unreachable,
-    //     }
-    // }
-}
-
-var scheduler: Process.Scheduler = undefined;
+var scheduler: kernel.Process.Scheduler = undefined;
 
 pub fn main(hartid: usize, devicetree_addr: usize) !void {
     _ = hartid;
@@ -110,7 +18,7 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
 
     try os.heap.initPageAllocator();
 
-    const fdt: Fdt = try .init(devicetree_addr);
+    const fdt: kernel.Fdt = try .init(devicetree_addr);
     var fdt_nodes = try fdt.nodes();
     while (try fdt_nodes.next()) |fdt_node| {
         if (!fdt_node.isCompatibleWith("virtio,mmio")) {
@@ -121,7 +29,7 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
             continue;
         };
         const address: usize = @truncate(registers.next().?.address());
-        var driver = virtio.init(address) catch |e| switch (e) {
+        var driver = kernel.virtio.init(address) catch |e| switch (e) {
             error.OutOfMemory, error.QueueAlreadyInUse => return e,
             error.InvalidDevice, error.UnsupportedDevice => {
                 log.info("skip device {s}", .{fdt_node.name});
@@ -238,8 +146,4 @@ fn procBEntry() void {
         scheduler.yield();
         delay();
     }
-}
-
-comptime {
-    std.testing.refAllDecls(@This());
 }
