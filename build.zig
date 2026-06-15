@@ -77,18 +77,15 @@ pub fn build(b: *std.Build) void {
         "unimp,guest_errors,int,cpu_reset",
         "-D",
         "qemu.log",
-        "-global",
-        "virtio-mmio.force-legacy=false",
-        "-drive",
-        "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
-        "-device",
-        "virtio-blk-device,drive=drive0,packed=true",
-        "-netdev",
-        "user,id=net0",
-        "-device",
-        "virtio-net-device,netdev=net0,packed=true",
-        "-kernel",
     });
+    run_cmd.addArgs(&.{
+        "-global", "virtio-mmio.force-legacy=false",
+        "-drive",  "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
+        "-device", "virtio-blk-device,drive=drive0,packed=true",
+        "-netdev", "user,id=net0",
+        "-device", "virtio-net-device,netdev=net0,packed=true",
+    });
+    run_cmd.addArg("-kernel");
     run_cmd.addArtifactArg(kernel_elf);
     run_cmd.step.dependOn(b.getInstallStep());
     run_step.dependOn(&run_cmd.step);
@@ -144,12 +141,6 @@ pub fn build(b: *std.Build) void {
             "unimp,guest_errors,int,cpu_reset",
             "-D",
             "qemu.log",
-            "-global",
-            "virtio-mmio.force-legacy=false",
-            "-drive",
-            "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
-            "-device",
-            "virtio-blk-device,drive=drive0,packed=true",
             "-kernel",
             null,
         });
