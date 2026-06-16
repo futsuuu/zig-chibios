@@ -1,7 +1,8 @@
 const std = @import("std");
 const log = std.log.scoped(.fdt);
 
-const Be = @import("shared").Be;
+const shared = @import("shared");
+const Be = shared.Be;
 
 const Fdt = @This();
 
@@ -188,13 +189,13 @@ pub const Register = struct {
 };
 
 pub const NodeIterator = struct {
-    structure_block: std.Io.Reader,
+    structure_block: shared.bytes.fixed.Readable,
     strings_block: []const u8,
     stack: std.ArrayList(Node),
 
     fn init(structure_block: []const u8, strings_block: []const u8, stack_buf: []Node) !NodeIterator {
         var self: NodeIterator = .{
-            .structure_block = .fixed(structure_block),
+            .structure_block = .init(structure_block),
             .strings_block = strings_block,
             .stack = .initBuffer(stack_buf),
         };
@@ -280,11 +281,12 @@ const TokenWithData = union(enum) {
     property: Property,
     end_node,
 
-    fn read(structure_block: *std.Io.Reader, strings_block: []const u8) !?TokenWithData {
+    fn read(structure_block: anytype, strings_block: []const u8) !?TokenWithData {
+        const r = shared.bytes.wrapWithReader(structure_block);
         const token: Token = try .read(structure_block);
         return sw: switch (token) {
             .begin_node => .{
-                .begin_node = try structure_block.takeSentinel(0),
+                .begin_node = try r.takeSentinel(0),
             },
             .property => .{
                 .property = try .read(structure_block, strings_block),
@@ -311,11 +313,11 @@ const Token = enum(u32) {
     nop = 4,
     end = 9,
 
-    fn read(structure_block: *std.Io.Reader) std.Io.Reader.TakeEnumError!Token {
+    fn read(structure_block: anytype) !Token {
+        const r = shared.bytes.wrapWithReader(structure_block);
         comptime std.debug.assert(4 == @alignOf(Token));
-        // FIXME: is this safe?
-        structure_block.seek = std.mem.alignForward(usize, structure_block.seek, @alignOf(Token));
-        return structure_block.takeEnum(Token, .big);
+        try r.alignForward(@alignOf(Token));
+        return r.takeEnum(Token, .big);
     }
 };
 
@@ -323,13 +325,14 @@ const Property = struct {
     name: []const u8,
     value: []align(@alignOf(u32)) const u8,
 
-    fn read(structure_block: *std.Io.Reader, strings_block: []const u8) std.Io.Reader.Error!Property {
-        const len = try structure_block.takeInt(u32, .big);
-        const name_start = try structure_block.takeInt(u32, .big);
+    fn read(structure_block: anytype, strings_block: []const u8) !Property {
+        const r = shared.bytes.wrapWithReader(structure_block);
+        const len = try r.takeInt(u32, .big);
+        const name_start = try r.takeInt(u32, .big);
         const name_end = std.mem.findScalarPos(u8, strings_block, name_start, 0) orelse return error.EndOfStream;
         return .{
             .name = strings_block[name_start..name_end],
-            .value = @alignCast(try structure_block.take(len)),
+            .value = @alignCast(try r.take(len)),
         };
     }
 };
@@ -388,13 +391,82 @@ pub const Header = extern struct {
 
     fn structureBlock(self: *const Header) []const u8 {
         const offest = self.dt_struct_offset.toNative();
-        const bytes: [*]const u8 = @ptrFromInt(@intFromPtr(self) + offest);
-        return bytes[0..self.dt_struct_size.toNative()];
+        const ptr: [*]const u8 = @ptrFromInt(@intFromPtr(self) + offest);
+        return ptr[0..self.dt_struct_size.toNative()];
     }
 
     fn stringsBlock(self: *const Header) []const u8 {
         const offest = self.dt_strings_offset.toNative();
-        const bytes: [*]const u8 = @ptrFromInt(@intFromPtr(self) + offest);
-        return bytes[0..self.dt_strings_size.toNative()];
+        const ptr: [*]const u8 = @ptrFromInt(@intFromPtr(self) + offest);
+        return ptr[0..self.dt_strings_size.toNative()];
     }
 };
+
+test "Fdt parse blob with child node" {
+    var dtb align(8) = [_]u8{
+        // Header (40 bytes at offset 0)
+        0xD0, 0x0D, 0xFE, 0xED, // magic
+        0x00, 0x00, 0x00, 0x8C, // total_size = 140
+        0x00, 0x00, 0x00, 0x40, // dt_struct_offset = 64
+        0x00, 0x00, 0x00, 0x80, // dt_strings_offset = 128
+        0x00, 0x00, 0x00, 0x28, // reserved_memory_offset = 40
+        0x00, 0x00, 0x00, 0x11, // version = 17
+        0x00, 0x00, 0x00, 0x10, // last_compatible_version = 16
+        0x00, 0x00, 0x00, 0x00, // boot_cpu_physical_id
+        0x00, 0x00, 0x00, 0x0C, // dt_strings_size = 12
+        0x00, 0x00, 0x00, 0x34, // dt_struct_size = 52
+
+        // Memory reservation block (16 bytes at offset 40)
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+
+        // Padding to offset 64 (8 bytes)
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+
+        // Structure block (52 bytes at offset 64)
+        // FDT_BEGIN_NODE (root)
+        0x00, 0x00, 0x00, 0x01,
+        // name (empty) padded to 4 bytes
+        0x00, 0x00, 0x00, 0x00,
+        // FDT_PROPERTY
+        0x00, 0x00, 0x00, 0x03,
+        // len = 5
+        0x00, 0x00, 0x00, 0x05,
+        // nameoff = 0 ("compatible")
+        0x00, 0x00, 0x00, 0x00,
+        // value = "test\0"
+        't',  'e',  's',  't',
+        0x00, 0x00, 0x00, 0x00,
+        // FDT_BEGIN_NODE (child)
+        0x00, 0x00, 0x00, 0x01,
+        // name "child\0"
+        'c',  'h',  'i',  'l',
+        'd',  0x00, 0x00, 0x00,
+        // FDT_END_NODE (child)
+        0x00, 0x00, 0x00, 0x02,
+        // FDT_END_NODE (root)
+        0x00, 0x00, 0x00, 0x02,
+        // FDT_END
+        0x00, 0x00, 0x00, 0x09,
+
+        // Padding to offset 128 (12 bytes)
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+
+        // Strings block (12 bytes at offset 128)
+        'c',  'o',  'm',  'p',
+        'a',  't',  'i',  'b',
+        'l',  'e',  0x00, 0x00,
+    };
+
+    var fdt = try Fdt.init(@intFromPtr(&dtb));
+    var it = try fdt.nodes();
+    const root = (try it.next()).?;
+    try std.testing.expectEqualStrings("", root.name);
+    try std.testing.expect(root.isCompatibleWith("test"));
+    try std.testing.expectEqual(null, try it.next());
+}
