@@ -4,7 +4,7 @@ const log = std.log.scoped(.virtio_net);
 const shared = @import("shared");
 const Le = shared.Le;
 
-const virtio = @import("../virtio.zig");
+const virtio = @import("root.zig");
 
 pub const Driver = struct {
     bump: shared.heap.PagedBumpAllocator,

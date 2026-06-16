@@ -26,6 +26,14 @@ pub fn build(b: *std.Build) void {
         break :shared mod;
     };
 
+    // TODO: add tests
+    const virtio_mod = b.createModule(.{
+        .root_source_file = b.path("src/virtio/root.zig"),
+        .imports = &.{
+            .{ .name = "shared", .module = shared_mod },
+        },
+    });
+
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -50,6 +58,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "kernel", .module = kernel_mod },
                 .{ .name = "shared", .module = shared_mod },
+                .{ .name = "virtio", .module = virtio_mod },
             },
         }),
     });
@@ -61,8 +70,7 @@ pub fn build(b: *std.Build) void {
         .riscv64 => "qemu-system-riscv64",
         else => unreachable,
     };
-    const run_cmd = b.addSystemCommand(&.{
-        qemu,
+    const common_qemu_args = [_][]const u8{
         "-machine",
         "virt",
         "-bios",
@@ -77,7 +85,10 @@ pub fn build(b: *std.Build) void {
         "unimp,guest_errors,int,cpu_reset",
         "-D",
         "qemu.log",
-    });
+    };
+
+    const run_cmd = b.addSystemCommand(&.{qemu});
+    run_cmd.addArgs(&common_qemu_args);
     run_cmd.addArgs(&.{
         "-global", "virtio-mmio.force-legacy=false",
         "-drive",  "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
@@ -125,25 +136,7 @@ pub fn build(b: *std.Build) void {
         });
         kernel_tests_mod.addImport("kernel", kernel_tests_mod); // needed for custom test runner
         kernel_tests.setLinkerScript(b.path("src/kernel.ld"));
-        kernel_tests.setExecCmd(&.{
-            qemu,
-            "-machine",
-            "virt",
-            "-bios",
-            "default",
-            "-nographic",
-            "-serial",
-            "mon:stdio",
-            "-no-reboot",
-            "-action",
-            "panic=exit-failure",
-            "-d",
-            "unimp,guest_errors,int,cpu_reset",
-            "-D",
-            "qemu.log",
-            "-kernel",
-            null,
-        });
+        kernel_tests.setExecCmd(&([_]?[]const u8{qemu} ++ common_qemu_args ++ .{ "-kernel", null }));
         const run_kernel_tests = b.addRunArtifact(kernel_tests);
         test_step.dependOn(&run_kernel_tests.step);
     }

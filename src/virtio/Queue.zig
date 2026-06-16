@@ -3,7 +3,7 @@ const log = std.log.scoped(.virtio_queue);
 
 const Le = @import("shared").Le;
 
-const virtio = @import("../virtio.zig");
+const virtio = @import("root.zig");
 
 const Queue = @This();
 

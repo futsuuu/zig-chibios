@@ -1,7 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.virtio);
 
-const virtio = @import("../virtio.zig");
+const virtio = @import("root.zig");
 
 pub const Reserved = enum(u32) {
     indirect_descriptor = 28,

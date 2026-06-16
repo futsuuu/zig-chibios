@@ -1,11 +1,11 @@
 const std = @import("std");
 const log = std.log.scoped(.virtio);
 
-pub const Queue = @import("virtio/Queue.zig");
-pub const block = @import("virtio/block.zig");
-pub const feature = @import("virtio/feature.zig");
-pub const mmio = @import("virtio/mmio.zig");
-pub const network = @import("virtio/network.zig");
+pub const Queue = @import("Queue.zig");
+pub const block = @import("block.zig");
+pub const feature = @import("feature.zig");
+pub const mmio = @import("mmio.zig");
+pub const network = @import("network.zig");
 
 pub const InitError = error{
     OutOfMemory,

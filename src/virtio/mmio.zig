@@ -5,7 +5,7 @@ const log = std.log.scoped(.virtio_mmio);
 
 const Le = @import("shared").Le;
 
-const virtio = @import("../virtio.zig");
+const virtio = @import("root.zig");
 
 pub const RegisterHeader = struct {
     pub const expected_magic: u32 = @bitCast(std.mem.nativeToLittle([4]u8, "virt".*));

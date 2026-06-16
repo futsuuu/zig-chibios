@@ -9,7 +9,6 @@ pub const sbi = @import("sbi.zig");
 pub const start = @import("start.zig");
 pub const sv32 = @import("sv32.zig");
 pub const trap = @import("trap.zig");
-pub const virtio = @import("virtio.zig");
 
 comptime {
     _ = start;

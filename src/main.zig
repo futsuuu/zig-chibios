@@ -3,6 +3,7 @@ const log = std.log.scoped(.kernel);
 
 const kernel = @import("kernel");
 const shared = @import("shared");
+const virtio = @import("virtio");
 
 pub const panic = kernel.panic;
 pub const std_options = kernel.std_options;
@@ -28,7 +29,7 @@ pub fn main(hartid: usize, devicetree_addr: usize, mem: kernel.start.KernelMemor
             continue;
         };
         const address: usize = @truncate(registers.next().?.address());
-        var driver = kernel.virtio.init(address) catch |e| switch (e) {
+        var driver = virtio.init(address) catch |e| switch (e) {
             error.OutOfMemory, error.QueueAlreadyInUse => return e,
             error.InvalidDevice, error.UnsupportedDevice => {
                 log.info("skip device {s}", .{fdt_node.name});
