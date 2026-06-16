@@ -248,6 +248,10 @@ pub const Context = struct {
         var stack_b: [1024]u8 align(@alignOf(usize)) = undefined;
         mod.cx_b = .init(&stack_b, @intFromPtr(&mod.entryB));
         @call(.never_inline, mod.entryA, .{});
-        try std.testing.expect(mod.counter == 45678);
+        try std.testing.expectEqual(45678, mod.counter);
     }
 };
+
+comptime {
+    std.testing.refAllDecls(@This());
+}
