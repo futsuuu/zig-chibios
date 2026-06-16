@@ -26,9 +26,9 @@ pub const os = struct {
     };
 };
 
-pub fn main() !noreturn {
+pub fn main(_: usize, _: usize, mem: kernel.start.KernelMemory) !noreturn {
     std.debug.print("\n", .{});
-    try kernel.os.heap.initPageAllocator();
+    try kernel.os.heap.initPageAllocator(mem.free_ram);
 
     var has_err = false;
     for (@as([]const std.builtin.TestFn, builtin.test_functions)) |t| {

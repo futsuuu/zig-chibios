@@ -34,11 +34,8 @@ pub const os = struct {
     pub const heap = struct {
         const PageAllocator = shared.heap.BuddyAllocator(.{});
 
-        pub fn initPageAllocator() std.mem.Allocator.Error!void {
-            const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
-            const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
-            const buf = free_ram[0 .. free_ram_end - free_ram];
-            instance = try .init(buf);
+        pub fn initPageAllocator(free_ram: []u8) std.mem.Allocator.Error!void {
+            instance = try .init(free_ram);
         }
 
         var instance: PageAllocator = undefined;

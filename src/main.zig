@@ -11,12 +11,11 @@ pub const os = kernel.os;
 
 var scheduler: kernel.Process.Scheduler = undefined;
 
-pub fn main(hartid: usize, devicetree_addr: usize) !void {
+pub fn main(hartid: usize, devicetree_addr: usize, mem: kernel.start.KernelMemory) !void {
     _ = hartid;
     defer log.info("exit", .{});
-    std.debug.print("\n", .{});
 
-    try os.heap.initPageAllocator();
+    try os.heap.initPageAllocator(mem.free_ram);
 
     const fdt: shared.Fdt = try .init(devicetree_addr);
     var fdt_nodes = try fdt.nodes();
@@ -116,7 +115,7 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
         }
     }
 
-    scheduler = try .init(std.heap.page_allocator);
+    scheduler = try .init(std.heap.page_allocator, mem.kernel_page);
     _ = try scheduler.spawn(&procAEntry, 8192);
     _ = try scheduler.spawn(&procBEntry, 8192);
     scheduler.yield();

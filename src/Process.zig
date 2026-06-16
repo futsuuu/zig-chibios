@@ -21,7 +21,12 @@ const uninit: Process = .{
     .context = undefined,
 };
 
-fn init(allocator: Allocator, pc: usize, stack_size: usize) Allocator.Error!Process {
+fn init(
+    allocator: Allocator,
+    pc: usize,
+    stack_size: usize,
+    kernel_page: []align(sv32.page_size) [sv32.page_size]u8,
+) Allocator.Error!Process {
     const stack = try allocator.alignedAlloc(u8, .of(usize), stack_size);
     errdefer allocator.free(stack);
     var self: Process = .{
@@ -30,11 +35,8 @@ fn init(allocator: Allocator, pc: usize, stack_size: usize) Allocator.Error!Proc
         .stack = stack,
         .context = .init(stack, pc),
     };
-    const kernel_page = @extern(*align(sv32.page_size) u8, .{ .name = "__kernel_page" });
-    const kernel_page_end = @extern(*align(sv32.page_size) u8, .{ .name = "__kernel_page_end" });
-    var ppn: sv32.PhysAddr.PageNumber = .fromPtr(kernel_page);
-    const ppn_end: sv32.PhysAddr.PageNumber = .fromPtr(kernel_page_end);
-    while (ppn.num < ppn_end.num) : (ppn.num += 1) {
+    for (kernel_page) |*page| {
+        var ppn: sv32.PhysAddr.PageNumber = .fromPtr(page);
         try self.page_table.mapPage(allocator, @intFromPtr(ppn.toPtr()), .init(ppn, .rwx));
     }
     return self;
@@ -65,21 +67,26 @@ pub const Scheduler = struct {
     idle: usize,
 
     allocator: std.mem.Allocator,
+    kernel_page: []align(sv32.page_size) [sv32.page_size]u8,
 
-    pub fn init(allocator: Allocator) Allocator.Error!Scheduler {
+    pub fn init(
+        allocator: Allocator,
+        kernel_page: []align(sv32.page_size) [sv32.page_size]u8,
+    ) Allocator.Error!Scheduler {
         var list: std.ArrayList(Process) = try .initCapacity(allocator, 1);
-        list.appendAssumeCapacity(try .init(allocator, 0, 64));
+        list.appendAssumeCapacity(try .init(allocator, 0, 64, kernel_page));
         return .{
             .list = list,
             .idle = 0,
             .current = 0,
             .allocator = allocator,
+            .kernel_page = kernel_page,
         };
     }
 
     pub fn spawn(self: *Scheduler, func: *const fn () void, stack_size: usize) Allocator.Error!*Process {
         const proc = self.getUnused() orelse try self.manage(.uninit);
-        proc.* = try .init(self.allocator, @intFromPtr(func), stack_size);
+        proc.* = try .init(self.allocator, @intFromPtr(func), stack_size, self.kernel_page);
         return proc;
     }
 

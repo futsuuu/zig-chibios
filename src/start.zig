@@ -1,11 +1,21 @@
 const root = @import("root");
 const std = @import("std");
+const page_size = std.heap.pageSize();
 
 const trap = @import("trap.zig");
 
 const bss = @extern([*]u8, .{ .name = "__bss" });
 const bss_end = @extern([*]u8, .{ .name = "__bss_end" });
 const stack_top = @extern(*u8, .{ .name = "__stack_top" });
+const kernel_page = @extern([*]align(page_size) [page_size]u8, .{ .name = "__kernel_page" });
+const kernel_page_end = @extern([*]align(page_size) [page_size]u8, .{ .name = "__kernel_page_end" });
+const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
+const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
+
+pub const KernelMemory = struct {
+    kernel_page: []align(page_size) [page_size]u8,
+    free_ram: []u8,
+};
 
 export fn _start() linksection(".text.boot") callconv(.naked) noreturn {
     asm volatile (
@@ -21,10 +31,11 @@ export fn kernelMain(hartid: usize, devicetree_addr: usize) callconv(.c) noretur
     @memset(bss[0 .. bss_end - bss], 0);
     trap.initHandler();
     trap.saveCurrentKernelStack(stack_top);
-    const res = if (0 < @typeInfo(@TypeOf(root.main)).@"fn".params.len)
-        root.main(hartid, devicetree_addr)
-    else
-        root.main();
+    const mem: KernelMemory = .{
+        .kernel_page = kernel_page[0 .. kernel_page_end - kernel_page],
+        .free_ram = free_ram[0 .. free_ram_end - free_ram],
+    };
+    const res = root.main(hartid, devicetree_addr, mem);
     switch (@TypeOf(res)) {
         void => {},
         else => |Result| {
