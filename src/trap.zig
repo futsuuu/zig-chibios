@@ -108,14 +108,14 @@ export fn handleTrap(frame: *Frame) void {
     const scause = csr.scause.read();
     switch (scause) {
         .interrupt => |interrupt| switch (interrupt) {
-            else => std.debug.panic("unexpected interrupt {f}: stval = 0x{x}, sepc = 0x{x}", .{
+            else => std.debug.panic("unexpected interrupt {f}: stval = 0x{X}, sepc = 0x{X}", .{
                 interrupt,
                 csr.stval.read(),
                 csr.sepc.read(),
             }),
         },
         .exception => |exception| switch (exception) {
-            else => std.debug.panic("unexpected exception {f}: stval = 0x{x}, sepc = 0x{x}", .{
+            else => std.debug.panic("unexpected exception {f}: stval = 0x{X}, sepc = 0x{X}", .{
                 exception,
                 csr.stval.read(),
                 csr.sepc.read(),
@@ -124,36 +124,12 @@ export fn handleTrap(frame: *Frame) void {
     }
 }
 
-const Frame = packed struct {
+const Frame = extern struct {
     ra: usize,
     gp: usize,
     tp: usize,
-    t0: usize,
-    t1: usize,
-    t2: usize,
-    t3: usize,
-    t4: usize,
-    t5: usize,
-    t6: usize,
-    a0: usize,
-    a1: usize,
-    a2: usize,
-    a3: usize,
-    a4: usize,
-    a5: usize,
-    a6: usize,
-    a7: usize,
-    s0: usize,
-    s1: usize,
-    s2: usize,
-    s3: usize,
-    s4: usize,
-    s5: usize,
-    s6: usize,
-    s7: usize,
-    s8: usize,
-    s9: usize,
-    s10: usize,
-    s11: usize,
+    t: [7]usize,
+    a: [8]usize,
+    s: [12]usize,
     sp: usize,
 };
