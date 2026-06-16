@@ -1,7 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.fdt);
 
-const shared = @import("shared");
+const shared = @import("root.zig");
 const Be = shared.Be;
 
 const Fdt = @This();

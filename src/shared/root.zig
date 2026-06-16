@@ -1,5 +1,6 @@
 const std = @import("std");
 
+pub const Fdt = @import("Fdt.zig");
 pub const bytes = @import("bytes.zig");
 const endian = @import("endian.zig");
 pub const Be = endian.Big;

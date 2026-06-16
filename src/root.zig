@@ -4,7 +4,6 @@ const log = std.log.scoped(.kernel);
 
 const shared = @import("shared");
 
-pub const Fdt = @import("Fdt.zig");
 pub const Process = @import("Process.zig");
 pub const sbi = @import("sbi.zig");
 pub const start = @import("start.zig");

@@ -18,7 +18,7 @@ pub fn main(hartid: usize, devicetree_addr: usize) !void {
 
     try os.heap.initPageAllocator();
 
-    const fdt: kernel.Fdt = try .init(devicetree_addr);
+    const fdt: shared.Fdt = try .init(devicetree_addr);
     var fdt_nodes = try fdt.nodes();
     while (try fdt_nodes.next()) |fdt_node| {
         if (!fdt_node.isCompatibleWith("virtio,mmio")) {
