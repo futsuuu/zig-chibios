@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.kernel);
 
+const arch = @import("arch");
 const kernel = @import("kernel");
 const shared = @import("shared");
 const virtio = @import("virtio");
@@ -8,15 +9,23 @@ const virtio = @import("virtio");
 pub const panic = kernel.panic;
 pub const std_options = kernel.std_options;
 pub const std_options_debug_io = kernel.std_options_debug_io;
-pub const os = kernel.os;
+pub const os = struct {
+    pub const heap = struct {
+        var page_allocator_instance: shared.heap.BuddyAllocator(.{}) = undefined;
+        pub const page_allocator: std.mem.Allocator = .{
+            .ptr = &page_allocator_instance,
+            .vtable = &shared.heap.BuddyAllocator(.{}).vtable,
+        };
+    };
+};
 
 var scheduler: kernel.Process.Scheduler = undefined;
 
-pub fn main(hartid: usize, devicetree_addr: usize, mem: kernel.start.KernelMemory) !void {
+pub fn main(hartid: usize, devicetree_addr: usize, mem: arch.riscv.kernel.Memory) !void {
     _ = hartid;
     defer log.info("exit", .{});
 
-    try os.heap.initPageAllocator(mem.free_ram);
+    os.heap.page_allocator_instance = try .init(mem.free_ram);
 
     const fdt: shared.Fdt = try .init(devicetree_addr);
     var fdt_nodes = try fdt.nodes();

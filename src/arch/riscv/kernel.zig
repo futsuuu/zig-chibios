@@ -12,7 +12,7 @@ const kernel_page_end = @extern([*]align(page_size) [page_size]u8, .{ .name = "_
 const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
 const free_ram_end = @extern([*]u8, .{ .name = "__free_ram_end" });
 
-pub const KernelMemory = struct {
+pub const Memory = struct {
     kernel_page: []align(page_size) [page_size]u8,
     free_ram: []u8,
 };
@@ -31,7 +31,7 @@ export fn kernelMain(hartid: usize, devicetree_addr: usize) callconv(.c) noretur
     @memset(bss[0 .. bss_end - bss], 0);
     trap.initHandler();
     trap.saveCurrentKernelStack(stack_top);
-    const mem: KernelMemory = .{
+    const mem: Memory = .{
         .kernel_page = kernel_page[0 .. kernel_page_end - kernel_page],
         .free_ram = free_ram[0 .. free_ram_end - free_ram],
     };

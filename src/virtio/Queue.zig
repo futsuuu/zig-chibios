@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log.scoped(.virtio_queue);
 
+const arch = @import("arch");
 const Le = @import("shared").Le;
 
 const virtio = @import("root.zig");
@@ -92,7 +93,7 @@ fn nextAvailable(self: *Queue) DescriptorIndex {
 }
 
 pub fn notify(self: *Queue) void {
-    asm volatile ("fence rw, rw" ::: .{ .memory = true });
+    arch.barrier.full();
     if (self.device_event.getEnabled()) |_| {
         self.register.queue_notify.write(.{ .vq_index = self.index, .data = undefined });
     }
@@ -160,7 +161,7 @@ const DescriptorChain = struct {
             last.write(self.queue, self.queue.nextAvailable(), id);
         }
         self.queue.chain_length_map[id] = self.len;
-        asm volatile ("fence rw, w" ::: .{ .memory = true });
+        arch.barrier.write();
         self.first.write(self.queue, self.first_dest, if (self.last != null) null else id);
         return id;
     }

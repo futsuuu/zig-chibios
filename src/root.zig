@@ -2,16 +2,13 @@ const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.kernel);
 
+const arch = @import("arch");
 const shared = @import("shared");
 
 pub const Process = @import("Process.zig");
-pub const sbi = @import("sbi.zig");
-pub const start = @import("start.zig");
-pub const sv32 = @import("sv32.zig");
-pub const trap = @import("trap.zig");
 
 comptime {
-    _ = start;
+    _ = arch.riscv.kernel;
 }
 
 pub const panic = std.debug.FullPanic(struct {
@@ -23,27 +20,11 @@ pub const panic = std.debug.FullPanic(struct {
 }.panic);
 
 pub const std_options: std.Options = .{
-    .page_size_min = sv32.page_size,
-    .page_size_max = sv32.page_size,
+    .page_size_min = arch.riscv.sv32.page_size,
+    .page_size_max = arch.riscv.sv32.page_size,
 };
 
-pub const std_options_debug_io = @import("debug_io.zig").init(sbi.debug_console.writer());
-
-pub const os = struct {
-    pub const heap = struct {
-        const PageAllocator = shared.heap.BuddyAllocator(.{});
-
-        pub fn initPageAllocator(free_ram: []u8) std.mem.Allocator.Error!void {
-            instance = try .init(free_ram);
-        }
-
-        var instance: PageAllocator = undefined;
-        pub const page_allocator: std.mem.Allocator = .{
-            .ptr = &instance,
-            .vtable = &PageAllocator.vtable,
-        };
-    };
-};
+pub const std_options_debug_io = shared.minimum_debug_io.init(arch.riscv.sbi.debug_console.writer());
 
 pub fn printPanicInfo(msg: []const u8, first_trace_addr: ?usize) void {
     @branchHint(.cold);

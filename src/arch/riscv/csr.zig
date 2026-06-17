@@ -154,6 +154,7 @@ pub const stvec = Register(.stvec, struct {
     fn encode(self: @This()) Format {
         return @bitCast(@intFromPtr(self.ptr) + @intFromEnum(self.mode));
     }
+
     test encode {
         try std.testing.expectEqual(
             Format{ .mode = .vectored, .base_addr = 0x12340 >> 2 },
@@ -167,6 +168,7 @@ pub const stvec = Register(.stvec, struct {
             .ptr = @ptrFromInt(@as(usize, value.base_addr) << @bitSizeOf(Mode)),
         };
     }
+
     test decode {
         try std.testing.expectEqual(
             @This(){ .mode = .vectored, .ptr = @ptrFromInt(0x12340) },

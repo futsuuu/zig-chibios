@@ -2,12 +2,18 @@ const builtin = @import("builtin");
 const std = @import("std");
 const log = std.log.scoped(.test_runner);
 
-const kernel = @import("kernel");
+const arch = @import("arch");
+const shared = @import("shared");
+
+comptime {
+    _ = arch.riscv.kernel;
+}
 
 pub const panic = std.debug.FullPanic(struct {
     fn panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
         @branchHint(.cold);
-        kernel.printPanicInfo(msg, first_trace_addr);
+        _ = first_trace_addr;
+        log.err("PANIC: {s}", .{msg});
         VirtTest.write(.{ .status = .fail, .code = 1 });
     }
 }.panic);
@@ -18,17 +24,10 @@ pub const std_options: std.Options = .{
     .page_size_max = 4 << 10,
 };
 
-pub const std_options_debug_io = kernel.std_options_debug_io;
+pub const std_options_debug_io = shared.minimum_debug_io.init(arch.riscv.sbi.debug_console.writer());
 
-pub const os = struct {
-    pub const heap = struct {
-        pub const page_allocator = kernel.os.heap.page_allocator;
-    };
-};
-
-pub fn main(_: usize, _: usize, mem: kernel.start.KernelMemory) !noreturn {
+pub fn main(_: usize, _: usize, _: arch.riscv.kernel.Memory) !noreturn {
     std.debug.print("\n", .{});
-    try kernel.os.heap.initPageAllocator(mem.free_ram);
 
     var has_err = false;
     for (@as([]const std.builtin.TestFn, builtin.test_functions)) |t| {

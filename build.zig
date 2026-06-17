@@ -26,10 +26,16 @@ pub fn build(b: *std.Build) void {
         break :shared mod;
     };
 
+    const arch_mod = b.createModule(.{
+        .root_source_file = b.path("src/arch/root.zig"),
+        .target = target,
+    });
+
     // TODO: add tests
     const virtio_mod = b.createModule(.{
         .root_source_file = b.path("src/virtio/root.zig"),
         .imports = &.{
+            .{ .name = "arch", .module = arch_mod },
             .{ .name = "shared", .module = shared_mod },
         },
     });
@@ -42,6 +48,7 @@ pub fn build(b: *std.Build) void {
         .strip = false,
         .stack_protector = false,
         .imports = &.{
+            .{ .name = "arch", .module = arch_mod },
             .{ .name = "shared", .module = shared_mod },
         },
     });
@@ -56,13 +63,14 @@ pub fn build(b: *std.Build) void {
             .strip = false,
             .stack_protector = false,
             .imports = &.{
+                .{ .name = "arch", .module = arch_mod },
                 .{ .name = "kernel", .module = kernel_mod },
                 .{ .name = "shared", .module = shared_mod },
                 .{ .name = "virtio", .module = virtio_mod },
             },
         }),
     });
-    kernel_elf.setLinkerScript(b.path("src/kernel.ld"));
+    kernel_elf.setLinkerScript(b.path("src/arch/riscv/kernel.ld"));
     b.installArtifact(kernel_elf);
 
     const qemu = switch (target.result.cpu.arch) {
@@ -98,7 +106,6 @@ pub fn build(b: *std.Build) void {
     });
     run_cmd.addArg("-kernel");
     run_cmd.addArtifactArg(kernel_elf);
-    run_cmd.step.dependOn(b.getInstallStep());
     run_step.dependOn(&run_cmd.step);
 
     for ([_]struct {
@@ -118,8 +125,8 @@ pub fn build(b: *std.Build) void {
             .optimize = .ReleaseSmall,
         },
     }) |opts| {
-        const kernel_tests_mod = b.createModule(.{
-            .root_source_file = b.path("src/root.zig"),
+        const arch_tests_mod = b.createModule(.{
+            .root_source_file = b.path("src/arch/root.zig"),
             .target = target,
             .optimize = opts.optimize,
             .no_builtin = true,
@@ -129,15 +136,15 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "shared", .module = shared_mod },
             },
         });
-        const kernel_tests = b.addTest(.{
+        arch_tests_mod.addImport("arch", arch_tests_mod);
+        const arch_tests = b.addTest(.{
             .name = opts.name,
-            .root_module = kernel_tests_mod,
+            .root_module = arch_tests_mod,
             .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
         });
-        kernel_tests_mod.addImport("kernel", kernel_tests_mod); // needed for custom test runner
-        kernel_tests.setLinkerScript(b.path("src/kernel.ld"));
-        kernel_tests.setExecCmd(&([_]?[]const u8{qemu} ++ common_qemu_args ++ .{ "-kernel", null }));
-        const run_kernel_tests = b.addRunArtifact(kernel_tests);
-        test_step.dependOn(&run_kernel_tests.step);
+        arch_tests.setLinkerScript(b.path("src/arch/riscv/kernel.ld"));
+        arch_tests.setExecCmd(&([_]?[]const u8{qemu} ++ common_qemu_args ++ .{ "-kernel", null }));
+        const run_arch_tests = b.addRunArtifact(arch_tests);
+        test_step.dependOn(&run_arch_tests.step);
     }
 }
