@@ -7,10 +7,6 @@ const shared = @import("shared");
 
 pub const Process = @import("Process.zig");
 
-comptime {
-    _ = arch.riscv.kernel;
-}
-
 pub const panic = std.debug.FullPanic(struct {
     fn panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
         @branchHint(.cold);

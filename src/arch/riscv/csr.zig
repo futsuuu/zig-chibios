@@ -47,7 +47,7 @@ fn formatEnum(ptr: anytype, writer: *std.Io.Writer) std.Io.Writer.Error!void {
 }
 
 /// Supervisor Address Translation and Protection
-pub const satp = Register(.satp, packed struct(u32) {
+pub const satp = Register(.satp, if (sxlen == 32) packed struct(u32) {
     /// (WARL)
     phys_page_num: u22,
     /// (WARL)
@@ -56,6 +56,20 @@ pub const satp = Register(.satp, packed struct(u32) {
     mode: enum(u1) {
         bare = 0,
         sv32 = 1,
+    },
+} else packed struct(u64) {
+    /// (WARL)
+    phys_page_num: u44,
+    /// (WARL)
+    addr_space_id: u16,
+    /// (WARL)
+    mode: enum(u4) {
+        bare = 0,
+        sv39 = 8,
+        sv48 = 9,
+        sv57 = 10,
+        /// Reserved
+        sv64 = 11,
     },
 });
 

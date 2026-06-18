@@ -21,6 +21,10 @@ pub const os = struct {
 
 var scheduler: kernel.Process.Scheduler = undefined;
 
+comptime {
+    _ = arch.riscv.kernel;
+}
+
 pub fn main(hartid: usize, devicetree_addr: usize, mem: arch.riscv.kernel.Memory) !void {
     _ = hartid;
     defer log.info("exit", .{});

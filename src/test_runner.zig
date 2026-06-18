@@ -52,14 +52,13 @@ pub fn main(_: usize, _: usize, _: arch.riscv.kernel.Memory) !noreturn {
 /// ```
 /// qemu-system-riscvxx -machine virt -action panic=exit-failure
 /// ```
-const VirtTest = packed struct(u64) {
+const VirtTest = packed struct(u32) {
     status: enum(u16) {
         fail = 0x3333,
         pass = 0x5555,
         reset = 0x7777,
     },
     code: u16,
-    _: u32 = 0,
 
     fn write(self: VirtTest) noreturn {
         asm volatile (

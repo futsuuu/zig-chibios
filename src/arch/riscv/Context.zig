@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const asm_utils = @import("asm_utils.zig");
+
 const Context = @This();
 
 stack_ptr: *const Registers,
@@ -31,23 +33,27 @@ test init {
 }
 
 pub fn overwrite(self: Context) void {
-    asm volatile (
-        \\ lw sp, (%[next])
-        \\ lw ra,  0  * 4(sp)
-        \\ lw s0,  1  * 4(sp)
-        \\ lw s1,  2  * 4(sp)
-        \\ lw s2,  3  * 4(sp)
-        \\ lw s3,  4  * 4(sp)
-        \\ lw s4,  5  * 4(sp)
-        \\ lw s5,  6  * 4(sp)
-        \\ lw s6,  7  * 4(sp)
-        \\ lw s7,  8  * 4(sp)
-        \\ lw s8,  9  * 4(sp)
-        \\ lw s9,  10 * 4(sp)
-        \\ lw s10, 11 * 4(sp)
-        \\ lw s11, 12 * 4(sp)
-        \\ addi sp, sp, 13 * 4
-        \\ ret
+    asm volatile (std.fmt.comptimePrint(
+            \\ {[lX]s} sp, (%[next])
+            \\ {[lX]s} ra,   0 * {[xlenb]}(sp)
+            \\ {[lX]s} s0,   1 * {[xlenb]}(sp)
+            \\ {[lX]s} s1,   2 * {[xlenb]}(sp)
+            \\ {[lX]s} s2,   3 * {[xlenb]}(sp)
+            \\ {[lX]s} s3,   4 * {[xlenb]}(sp)
+            \\ {[lX]s} s4,   5 * {[xlenb]}(sp)
+            \\ {[lX]s} s5,   6 * {[xlenb]}(sp)
+            \\ {[lX]s} s6,   7 * {[xlenb]}(sp)
+            \\ {[lX]s} s7,   8 * {[xlenb]}(sp)
+            \\ {[lX]s} s8,   9 * {[xlenb]}(sp)
+            \\ {[lX]s} s9,  10 * {[xlenb]}(sp)
+            \\ {[lX]s} s10, 11 * {[xlenb]}(sp)
+            \\ {[lX]s} s11, 12 * {[xlenb]}(sp)
+            \\ addi sp, sp, 13 * {[xlenb]}
+            \\ ret
+        , .{
+            .lX = asm_utils.load_xlen,
+            .xlenb = asm_utils.xlenb,
+        })
         :
         : [next] "r" (&self.stack_ptr),
         : .{ .memory = true });
@@ -67,41 +73,45 @@ fn swtch(
     // prev: *sp,
     // next: *const sp,
 ) callconv(.naked) noreturn {
-    asm volatile (
-        \\ addi sp, sp, -13 * 4
-        \\ sw ra,  0  * 4(sp)
-        \\ sw s0,  1  * 4(sp)
-        \\ sw s1,  2  * 4(sp)
-        \\ sw s2,  3  * 4(sp)
-        \\ sw s3,  4  * 4(sp)
-        \\ sw s4,  5  * 4(sp)
-        \\ sw s5,  6  * 4(sp)
-        \\ sw s6,  7  * 4(sp)
-        \\ sw s7,  8  * 4(sp)
-        \\ sw s8,  9  * 4(sp)
-        \\ sw s9,  10 * 4(sp)
-        \\ sw s10, 11 * 4(sp)
-        \\ sw s11, 12 * 4(sp)
-        // prev = sp
-        \\ sw sp, (a0)
-        // sp = next
-        \\ lw sp, (a1)
-        \\ lw ra,  0  * 4(sp)
-        \\ lw s0,  1  * 4(sp)
-        \\ lw s1,  2  * 4(sp)
-        \\ lw s2,  3  * 4(sp)
-        \\ lw s3,  4  * 4(sp)
-        \\ lw s4,  5  * 4(sp)
-        \\ lw s5,  6  * 4(sp)
-        \\ lw s6,  7  * 4(sp)
-        \\ lw s7,  8  * 4(sp)
-        \\ lw s8,  9  * 4(sp)
-        \\ lw s9,  10 * 4(sp)
-        \\ lw s10, 11 * 4(sp)
-        \\ lw s11, 12 * 4(sp)
-        \\ addi sp, sp, 13 * 4
-        \\ ret
-        ::: .{ .memory = true });
+    asm volatile (std.fmt.comptimePrint(
+            \\ addi sp, sp, -13 * {[xlenb]}
+            \\ {[sX]s} ra,   0 * {[xlenb]}(sp)
+            \\ {[sX]s} s0,   1 * {[xlenb]}(sp)
+            \\ {[sX]s} s1,   2 * {[xlenb]}(sp)
+            \\ {[sX]s} s2,   3 * {[xlenb]}(sp)
+            \\ {[sX]s} s3,   4 * {[xlenb]}(sp)
+            \\ {[sX]s} s4,   5 * {[xlenb]}(sp)
+            \\ {[sX]s} s5,   6 * {[xlenb]}(sp)
+            \\ {[sX]s} s6,   7 * {[xlenb]}(sp)
+            \\ {[sX]s} s7,   8 * {[xlenb]}(sp)
+            \\ {[sX]s} s8,   9 * {[xlenb]}(sp)
+            \\ {[sX]s} s9,  10 * {[xlenb]}(sp)
+            \\ {[sX]s} s10, 11 * {[xlenb]}(sp)
+            \\ {[sX]s} s11, 12 * {[xlenb]}(sp)
+            // prev = sp
+            \\ {[sX]s} sp, (a0)
+            // sp = next
+            \\ {[lX]s} sp, (a1)
+            \\ {[lX]s} ra,   0 * {[xlenb]}(sp)
+            \\ {[lX]s} s0,   1 * {[xlenb]}(sp)
+            \\ {[lX]s} s1,   2 * {[xlenb]}(sp)
+            \\ {[lX]s} s2,   3 * {[xlenb]}(sp)
+            \\ {[lX]s} s3,   4 * {[xlenb]}(sp)
+            \\ {[lX]s} s4,   5 * {[xlenb]}(sp)
+            \\ {[lX]s} s5,   6 * {[xlenb]}(sp)
+            \\ {[lX]s} s6,   7 * {[xlenb]}(sp)
+            \\ {[lX]s} s7,   8 * {[xlenb]}(sp)
+            \\ {[lX]s} s8,   9 * {[xlenb]}(sp)
+            \\ {[lX]s} s9,  10 * {[xlenb]}(sp)
+            \\ {[lX]s} s10, 11 * {[xlenb]}(sp)
+            \\ {[lX]s} s11, 12 * {[xlenb]}(sp)
+            \\ addi sp, sp, 13 * {[xlenb]}
+            \\ ret
+        , .{
+            .lX = asm_utils.load_xlen,
+            .sX = asm_utils.store_xlen,
+            .xlenb = asm_utils.xlenb,
+        }) ::: .{ .memory = true });
 }
 
 test "switch context multiple times" {

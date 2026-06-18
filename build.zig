@@ -135,6 +135,7 @@ pub fn build(b: *std.Build) void {
             .imports = &.{
                 .{ .name = "shared", .module = shared_mod },
             },
+            .code_model = .medany,
         });
         arch_tests_mod.addImport("arch", arch_tests_mod);
         const arch_tests = b.addTest(.{
