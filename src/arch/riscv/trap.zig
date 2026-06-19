@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const asm_utils = @import("asm_utils.zig");
 const csr = @import("csr.zig");
 
 pub fn initHandler() void {
@@ -14,93 +15,97 @@ pub fn saveCurrentKernelStack(stack_top: *const anyopaque) void {
 }
 
 fn kernelEntry() align(4) callconv(.naked) noreturn {
-    asm volatile (
-    // sp = user_sp;
-    // sscratch = kernel_stack_top;
-        \\
-        // sp = kernel_stack_top;
-        // sscratch = user_sp;
-        \\ csrrw sp, sscratch, sp
-        \\
-        // frame: Frame = .{ ... };
-        // sp = &frame;
-        \\ addi sp, sp, -4 * 31
-        \\ sw ra,  4 * 0(sp)
-        \\ sw gp,  4 * 1(sp)
-        \\ sw tp,  4 * 2(sp)
-        \\ sw t0,  4 * 3(sp)
-        \\ sw t1,  4 * 4(sp)
-        \\ sw t2,  4 * 5(sp)
-        \\ sw t3,  4 * 6(sp)
-        \\ sw t4,  4 * 7(sp)
-        \\ sw t5,  4 * 8(sp)
-        \\ sw t6,  4 * 9(sp)
-        \\ sw a0,  4 * 10(sp)
-        \\ sw a1,  4 * 11(sp)
-        \\ sw a2,  4 * 12(sp)
-        \\ sw a3,  4 * 13(sp)
-        \\ sw a4,  4 * 14(sp)
-        \\ sw a5,  4 * 15(sp)
-        \\ sw a6,  4 * 16(sp)
-        \\ sw a7,  4 * 17(sp)
-        \\ sw s0,  4 * 18(sp)
-        \\ sw s1,  4 * 19(sp)
-        \\ sw s2,  4 * 20(sp)
-        \\ sw s3,  4 * 21(sp)
-        \\ sw s4,  4 * 22(sp)
-        \\ sw s5,  4 * 23(sp)
-        \\ sw s6,  4 * 24(sp)
-        \\ sw s7,  4 * 25(sp)
-        \\ sw s8,  4 * 26(sp)
-        \\ sw s9,  4 * 27(sp)
-        \\ sw s10, 4 * 28(sp)
-        \\ sw s11, 4 * 29(sp)
-        \\
-        // frame.sp = user_sp;
-        \\ csrr a0, sscratch
-        \\ sw a0,  4 * 30(sp)
-        \\
-        // sscratch = kernel_stack_top;
-        \\ addi a0, sp, 4 * 31
-        \\ csrw sscratch, a0
-        \\
-        // handleTrap(&frame);
-        \\ mv a0, sp
-        \\ call handleTrap
-        \\
-        \\ lw ra,  4 * 0(sp)
-        \\ lw gp,  4 * 1(sp)
-        \\ lw tp,  4 * 2(sp)
-        \\ lw t0,  4 * 3(sp)
-        \\ lw t1,  4 * 4(sp)
-        \\ lw t2,  4 * 5(sp)
-        \\ lw t3,  4 * 6(sp)
-        \\ lw t4,  4 * 7(sp)
-        \\ lw t5,  4 * 8(sp)
-        \\ lw t6,  4 * 9(sp)
-        \\ lw a0,  4 * 10(sp)
-        \\ lw a1,  4 * 11(sp)
-        \\ lw a2,  4 * 12(sp)
-        \\ lw a3,  4 * 13(sp)
-        \\ lw a4,  4 * 14(sp)
-        \\ lw a5,  4 * 15(sp)
-        \\ lw a6,  4 * 16(sp)
-        \\ lw a7,  4 * 17(sp)
-        \\ lw s0,  4 * 18(sp)
-        \\ lw s1,  4 * 19(sp)
-        \\ lw s2,  4 * 20(sp)
-        \\ lw s3,  4 * 21(sp)
-        \\ lw s4,  4 * 22(sp)
-        \\ lw s5,  4 * 23(sp)
-        \\ lw s6,  4 * 24(sp)
-        \\ lw s7,  4 * 25(sp)
-        \\ lw s8,  4 * 26(sp)
-        \\ lw s9,  4 * 27(sp)
-        \\ lw s10, 4 * 28(sp)
-        \\ lw s11, 4 * 29(sp)
-        \\ lw sp,  4 * 30(sp)
-        \\ sret
-    );
+    asm volatile (std.fmt.comptimePrint(
+            // sp = user_sp;
+            // sscratch = kernel_stack_top;
+            \\
+            // sp = kernel_stack_top;
+            // sscratch = user_sp;
+            \\ csrrw sp, sscratch, sp
+            \\
+            // frame: Frame = .{ ... };
+            // sp = &frame;
+            \\ addi sp, sp, -31 * {[xlenb]}
+            \\ {[sX]s} ra,   0 * {[xlenb]}(sp)
+            \\ {[sX]s} gp,   1 * {[xlenb]}(sp)
+            \\ {[sX]s} tp,   2 * {[xlenb]}(sp)
+            \\ {[sX]s} t0,   3 * {[xlenb]}(sp)
+            \\ {[sX]s} t1,   4 * {[xlenb]}(sp)
+            \\ {[sX]s} t2,   5 * {[xlenb]}(sp)
+            \\ {[sX]s} t3,   6 * {[xlenb]}(sp)
+            \\ {[sX]s} t4,   7 * {[xlenb]}(sp)
+            \\ {[sX]s} t5,   8 * {[xlenb]}(sp)
+            \\ {[sX]s} t6,   9 * {[xlenb]}(sp)
+            \\ {[sX]s} a0,  10 * {[xlenb]}(sp)
+            \\ {[sX]s} a1,  11 * {[xlenb]}(sp)
+            \\ {[sX]s} a2,  12 * {[xlenb]}(sp)
+            \\ {[sX]s} a3,  13 * {[xlenb]}(sp)
+            \\ {[sX]s} a4,  14 * {[xlenb]}(sp)
+            \\ {[sX]s} a5,  15 * {[xlenb]}(sp)
+            \\ {[sX]s} a6,  16 * {[xlenb]}(sp)
+            \\ {[sX]s} a7,  17 * {[xlenb]}(sp)
+            \\ {[sX]s} s0,  18 * {[xlenb]}(sp)
+            \\ {[sX]s} s1,  19 * {[xlenb]}(sp)
+            \\ {[sX]s} s2,  20 * {[xlenb]}(sp)
+            \\ {[sX]s} s3,  21 * {[xlenb]}(sp)
+            \\ {[sX]s} s4,  22 * {[xlenb]}(sp)
+            \\ {[sX]s} s5,  23 * {[xlenb]}(sp)
+            \\ {[sX]s} s6,  24 * {[xlenb]}(sp)
+            \\ {[sX]s} s7,  25 * {[xlenb]}(sp)
+            \\ {[sX]s} s8,  26 * {[xlenb]}(sp)
+            \\ {[sX]s} s9,  27 * {[xlenb]}(sp)
+            \\ {[sX]s} s10, 28 * {[xlenb]}(sp)
+            \\ {[sX]s} s11, 29 * {[xlenb]}(sp)
+            \\
+            // frame.sp = user_sp;
+            \\ csrr a0, sscratch
+            \\ {[sX]s} a0,  30 * {[xlenb]}(sp)
+            \\
+            // sscratch = kernel_stack_top;
+            \\ addi a0, sp, 31 * {[xlenb]}
+            \\ csrw sscratch, a0
+            \\
+            // handleTrap(&frame);
+            \\ mv a0, sp
+            \\ call handleTrap
+            \\
+            \\ {[lX]s} ra,   0 * {[xlenb]}(sp)
+            \\ {[lX]s} gp,   1 * {[xlenb]}(sp)
+            \\ {[lX]s} tp,   2 * {[xlenb]}(sp)
+            \\ {[lX]s} t0,   3 * {[xlenb]}(sp)
+            \\ {[lX]s} t1,   4 * {[xlenb]}(sp)
+            \\ {[lX]s} t2,   5 * {[xlenb]}(sp)
+            \\ {[lX]s} t3,   6 * {[xlenb]}(sp)
+            \\ {[lX]s} t4,   7 * {[xlenb]}(sp)
+            \\ {[lX]s} t5,   8 * {[xlenb]}(sp)
+            \\ {[lX]s} t6,   9 * {[xlenb]}(sp)
+            \\ {[lX]s} a0,  10 * {[xlenb]}(sp)
+            \\ {[lX]s} a1,  11 * {[xlenb]}(sp)
+            \\ {[lX]s} a2,  12 * {[xlenb]}(sp)
+            \\ {[lX]s} a3,  13 * {[xlenb]}(sp)
+            \\ {[lX]s} a4,  14 * {[xlenb]}(sp)
+            \\ {[lX]s} a5,  15 * {[xlenb]}(sp)
+            \\ {[lX]s} a6,  16 * {[xlenb]}(sp)
+            \\ {[lX]s} a7,  17 * {[xlenb]}(sp)
+            \\ {[lX]s} s0,  18 * {[xlenb]}(sp)
+            \\ {[lX]s} s1,  19 * {[xlenb]}(sp)
+            \\ {[lX]s} s2,  20 * {[xlenb]}(sp)
+            \\ {[lX]s} s3,  21 * {[xlenb]}(sp)
+            \\ {[lX]s} s4,  22 * {[xlenb]}(sp)
+            \\ {[lX]s} s5,  23 * {[xlenb]}(sp)
+            \\ {[lX]s} s6,  24 * {[xlenb]}(sp)
+            \\ {[lX]s} s7,  25 * {[xlenb]}(sp)
+            \\ {[lX]s} s8,  26 * {[xlenb]}(sp)
+            \\ {[lX]s} s9,  27 * {[xlenb]}(sp)
+            \\ {[lX]s} s10, 28 * {[xlenb]}(sp)
+            \\ {[lX]s} s11, 29 * {[xlenb]}(sp)
+            \\ {[lX]s} sp,  30 * {[xlenb]}(sp)
+            \\ sret
+        , .{
+            .lX = asm_utils.load_xlen,
+            .sX = asm_utils.store_xlen,
+            .xlenb = asm_utils.xlenb,
+        }));
 }
 
 export fn handleTrap(frame: *Frame) void {
