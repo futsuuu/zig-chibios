@@ -36,8 +36,8 @@ fn init(
         .context = .init(stack, pc),
     };
     for (kernel_page) |*page| {
-        var ppn: sv32.PhysAddr.PageNumber = .fromPtr(page);
-        try self.page_table.mapPage(allocator, @intFromPtr(ppn.toPtr()), .init(ppn, .rwx));
+        const ppn: sv32.PhysAddr.PageNumber = .fromPtr(page);
+        try self.page_table.mapPage(allocator, @bitCast(@as(u20, @intCast(ppn.num))), .init(ppn, .rwx));
     }
     return self;
 }

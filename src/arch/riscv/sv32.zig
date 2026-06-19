@@ -10,33 +10,42 @@ pub const page_size = b: {
 
 pub const VirtAddr = packed struct(u32) {
     offset: u12,
-    page_number_0: u10,
-    page_number_1: u10,
+    page_number: PageNumber,
 
     pub const Level = enum {
-        lv1,
         lv0,
+        lv1,
 
         pub const root: Level = .lv1;
 
         pub fn lower(self: Level) Level {
             return switch (self) {
-                .lv1 => .lv0,
                 .lv0 => @compileError("level 0 is the lowest level"),
+                .lv1 => .lv0,
             };
         }
     };
 
-    fn PageNumberType(level: Level) type {
-        return @FieldType(VirtAddr, switch (level) {
-            .lv0 => "page_number_0",
-            .lv1 => "page_number_1",
-        });
-    }
+    pub const PageNumber = packed struct {
+        lv0: u10,
+        lv1: u10,
 
-    fn entryCount(level: Level) usize {
-        return 1 << @bitSizeOf(PageNumberType(level));
-    }
+        fn FieldType(level: Level) type {
+            _ = level;
+            return u10;
+        }
+
+        fn get(self: PageNumber, comptime level: Level) FieldType(level) {
+            return switch (level) {
+                .lv0 => self.lv0,
+                .lv1 => self.lv1,
+            };
+        }
+
+        fn entryCount(level: Level) usize {
+            return 1 << @bitSizeOf(FieldType(level));
+        }
+    };
 };
 
 pub const PhysAddr = packed struct(u34) {
@@ -57,7 +66,7 @@ pub const PhysAddr = packed struct(u34) {
 };
 
 pub fn PageTable(level: VirtAddr.Level) type {
-    const entry_count = VirtAddr.entryCount(level);
+    const entry_count = VirtAddr.PageNumber.entryCount(level);
 
     return struct {
         const Self = @This();
@@ -104,22 +113,27 @@ pub fn PageTable(level: VirtAddr.Level) type {
             return .fromPtr(self.entries);
         }
 
-        fn getEntry(self: Self, vpn: VirtAddr.PageNumberType(level)) *Entry {
+        fn getEntry(self: Self, vpn: VirtAddr.PageNumber.FieldType(level)) *Entry {
             return &self.entries[vpn];
         }
 
         pub fn mapPage(
-            table1: PageTable(.root),
+            self: Self,
             allocator: Allocator,
-            vaddr: u32,
-            entry: PageTable(.lv0).Entry,
+            vpn: VirtAddr.PageNumber,
+            leaf_entry: PageTable(.lv0).Entry,
         ) Allocator.Error!void {
-            const virt_addr: VirtAddr = @bitCast(vaddr);
-            std.debug.assert(virt_addr.offset == 0);
-            const entry1 = table1.getEntry(virt_addr.page_number_1);
-            const table0 = try entry1.getOrInitTable(allocator);
-            const entry0 = table0.getEntry(virt_addr.page_number_0);
-            entry0.* = entry;
+            const entry = self.getEntry(vpn.get(level));
+            if (level == .lv0) {
+                entry.* = leaf_entry;
+                return;
+            }
+            const child: PageTable(level.lower()) = if (entry.flags.valid) .fromPageNumber(entry.ppn) else b: {
+                const child: PageTable(level.lower()) = try .init(allocator);
+                entry.* = .init(child.getPageNumber(), .ptr);
+                break :b child;
+            };
+            try child.mapPage(allocator, vpn, leaf_entry);
         }
 
         pub const Entry = packed struct(u32) {
