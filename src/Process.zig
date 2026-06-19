@@ -8,7 +8,7 @@ const sv32 = arch.riscv.sv32;
 const Process = @This();
 
 state: State,
-page_table: sv32.RootPageTable,
+page_table: sv32.PageTable(.root),
 stack: []align(@alignOf(usize)) u8,
 context: arch.Context,
 

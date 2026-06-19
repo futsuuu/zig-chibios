@@ -13,18 +13,29 @@ pub const VirtAddr = packed struct(u32) {
     page_number_0: u10,
     page_number_1: u10,
 
-    pub const Layer = u1;
-    pub const max_layer: Layer = 1;
+    pub const Level = enum {
+        lv1,
+        lv0,
 
-    fn PageNumberType(layer: Layer) type {
-        return @FieldType(VirtAddr, switch (layer) {
-            0 => "page_number_0",
-            1 => "page_number_1",
+        pub const root: Level = .lv1;
+
+        pub fn lower(self: Level) Level {
+            return switch (self) {
+                .lv1 => .lv0,
+                .lv0 => @compileError("level 0 is the lowest level"),
+            };
+        }
+    };
+
+    fn PageNumberType(level: Level) type {
+        return @FieldType(VirtAddr, switch (level) {
+            .lv0 => "page_number_0",
+            .lv1 => "page_number_1",
         });
     }
 
-    fn entryCount(layer: Layer) usize {
-        return 1 << @bitSizeOf(PageNumberType(layer));
+    fn entryCount(level: Level) usize {
+        return 1 << @bitSizeOf(PageNumberType(level));
     }
 };
 
@@ -45,11 +56,8 @@ pub const PhysAddr = packed struct(u34) {
     };
 };
 
-pub const RootPageTable = PageTable(VirtAddr.max_layer);
-pub const LeafEntry = PageTable(0).Entry;
-
-pub fn PageTable(layer: VirtAddr.Layer) type {
-    const entry_count = VirtAddr.entryCount(layer);
+pub fn PageTable(level: VirtAddr.Level) type {
+    const entry_count = VirtAddr.entryCount(level);
 
     return struct {
         const Self = @This();
@@ -73,7 +81,7 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
             allocator.free(@as([]Entry, self.entries));
         }
 
-        pub fn activate(self: RootPageTable) void {
+        pub fn activate(self: PageTable(.root)) void {
             const satp: csr.satp.Format = .{
                 .mode = .sv32,
                 .phys_page_num = self.getPageNumber().num,
@@ -96,15 +104,15 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
             return .fromPtr(self.entries);
         }
 
-        fn getEntry(self: Self, vpn: VirtAddr.PageNumberType(layer)) *Entry {
+        fn getEntry(self: Self, vpn: VirtAddr.PageNumberType(level)) *Entry {
             return &self.entries[vpn];
         }
 
         pub fn mapPage(
-            table1: RootPageTable,
+            table1: PageTable(.root),
             allocator: Allocator,
             vaddr: u32,
-            entry: LeafEntry,
+            entry: PageTable(.lv0).Entry,
         ) Allocator.Error!void {
             const virt_addr: VirtAddr = @bitCast(vaddr);
             std.debug.assert(virt_addr.offset == 0);
@@ -142,7 +150,7 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
                     try writer.writeByte(if (self.valid) 'v' else '-');
                 }
 
-                const valid_flags = if (layer == 0) .{ r, rw, x, rx, rwx } else .{ptr};
+                const valid_flags = if (level == .lv0) .{ r, rw, x, rx, rwx } else .{ptr};
                 const ptr: Flags = .{};
                 pub const r: Flags = .{ .readable = true };
                 pub const rw: Flags = .{ .readable = true, .writable = true };
@@ -155,19 +163,16 @@ pub fn PageTable(layer: VirtAddr.Layer) type {
                 comptime for (Flags.valid_flags) |valid| {
                     if (flags == valid) break;
                 } else {
-                    @compileError(std.fmt.comptimePrint(
-                        "invalid flags for layer {}: {f}",
-                        .{ layer, flags },
-                    ));
+                    @compileError(std.fmt.comptimePrint("invalid flags for {}: {f}", .{ level, flags }));
                 };
                 return .{ .ppn = ppn, .flags = flags };
             }
 
-            fn getOrInitTable(self: *Entry, allocator: Allocator) Allocator.Error!PageTable(layer - 1) {
+            fn getOrInitTable(self: *Entry, allocator: Allocator) Allocator.Error!PageTable(level.lower()) {
                 if (self.flags.valid) {
                     return .fromPageNumber(self.ppn);
                 }
-                const table: PageTable(layer - 1) = try .init(allocator);
+                const table: PageTable(level.lower()) = try .init(allocator);
                 self.* = .init(table.getPageNumber(), .ptr);
                 return table;
             }
