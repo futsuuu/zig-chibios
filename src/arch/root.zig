@@ -1,9 +1,10 @@
 const std = @import("std");
 
 pub const riscv = @import("riscv.zig");
-pub const trap = riscv.trap;
 pub const Context = riscv.Context;
 pub const barrier = riscv.barrier;
+pub const mmu = riscv.mmu.sv32;
+pub const trap = riscv.trap;
 
 comptime {
     _ = riscv;

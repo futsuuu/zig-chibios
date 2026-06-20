@@ -1,7 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const csr = @import("csr.zig");
+const csr = @import("../csr.zig");
 
 pub const page_size = b: {
     std.debug.assert(@FieldType(VirtAddr, "offset") == @FieldType(PhysAddr, "offset"));

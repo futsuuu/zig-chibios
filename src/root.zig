@@ -16,8 +16,8 @@ pub const panic = std.debug.FullPanic(struct {
 }.panic);
 
 pub const std_options: std.Options = .{
-    .page_size_min = arch.riscv.sv32.page_size,
-    .page_size_max = arch.riscv.sv32.page_size,
+    .page_size_min = arch.mmu.page_size,
+    .page_size_max = arch.mmu.page_size,
 };
 
 pub const std_options_debug_io = shared.minimum_debug_io.init(arch.riscv.sbi.debug_console.writer());

@@ -1,14 +1,14 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const log = std.log.scoped(.process);
+const page_size = std.heap.pageSize();
 
 const arch = @import("arch");
-const sv32 = arch.riscv.sv32;
 
 const Process = @This();
 
 state: State,
-page_table: sv32.PageTable(.root),
+page_table: arch.mmu.PageTable(.root),
 stack: []align(@alignOf(usize)) u8,
 context: arch.Context,
 
@@ -25,7 +25,7 @@ fn init(
     allocator: Allocator,
     pc: usize,
     stack_size: usize,
-    kernel_page: []align(sv32.page_size) [sv32.page_size]u8,
+    kernel_page: []align(page_size) [page_size]u8,
 ) Allocator.Error!Process {
     const stack = try allocator.alignedAlloc(u8, .of(usize), stack_size);
     errdefer allocator.free(stack);
@@ -36,7 +36,7 @@ fn init(
         .context = .init(stack, pc),
     };
     for (kernel_page) |*page| {
-        const ppn: sv32.PhysAddr.PageNumber = .fromPtr(page);
+        const ppn: arch.mmu.PhysAddr.PageNumber = .fromPtr(page);
         try self.page_table.mapPage(allocator, @bitCast(@as(u20, @intCast(ppn.num))), .init(ppn, .rwx));
     }
     return self;
@@ -67,11 +67,11 @@ pub const Scheduler = struct {
     idle: usize,
 
     allocator: std.mem.Allocator,
-    kernel_page: []align(sv32.page_size) [sv32.page_size]u8,
+    kernel_page: []align(page_size) [page_size]u8,
 
     pub fn init(
         allocator: Allocator,
-        kernel_page: []align(sv32.page_size) [sv32.page_size]u8,
+        kernel_page: []align(page_size) [page_size]u8,
     ) Allocator.Error!Scheduler {
         var list: std.ArrayList(Process) = try .initCapacity(allocator, 1);
         list.appendAssumeCapacity(try .init(allocator, 0, 64, kernel_page));
