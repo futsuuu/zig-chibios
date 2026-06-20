@@ -10,37 +10,41 @@ pub const page_size = b: {
     break :b 1 << @bitSizeOf(@FieldType(VirtAddr, "offset"));
 };
 
-pub const VirtAddr = packed struct(u32) {
+pub const VirtAddr = packed struct(u39) {
     offset: u12,
     page_number: PageNumber,
 
     pub const Level = enum {
         lv0,
         lv1,
+        lv2,
 
-        pub const root: Level = .lv1;
+        pub const root: Level = .lv2;
 
         pub fn lower(self: Level) Level {
             return switch (self) {
                 .lv0 => @compileError("level 0 is the lowest level"),
                 .lv1 => .lv0,
+                .lv2 => .lv1,
             };
         }
     };
 
     pub const PageNumber = packed struct {
-        lv0: u10,
-        lv1: u10,
+        lv0: u9,
+        lv1: u9,
+        lv2: u9,
 
         fn FieldType(level: Level) type {
             _ = level;
-            return u10;
+            return u9;
         }
 
         fn get(self: PageNumber, comptime level: Level) FieldType(level) {
             return switch (level) {
                 .lv0 => self.lv0,
                 .lv1 => self.lv1,
+                .lv2 => self.lv2,
             };
         }
 
@@ -50,12 +54,12 @@ pub const VirtAddr = packed struct(u32) {
     };
 };
 
-pub const PhysAddr = packed struct(u34) {
+pub const PhysAddr = packed struct(u56) {
     offset: u12,
     page_number: PageNumber,
 
     pub const PageNumber = packed struct {
-        num: u22,
+        num: u44,
 
         pub fn fromPtr(ptr: *align(page_size) const anyopaque) PageNumber {
             return .{ .num = @intCast(@intFromPtr(ptr) / page_size) };
@@ -94,7 +98,7 @@ pub fn PageTable(level: VirtAddr.Level) type {
 
         pub fn activate(self: PageTable(.root)) void {
             const satp: csr.satp.Format = .{
-                .mode = .sv32,
+                .mode = .sv39,
                 .phys_page_num = self.getPageNumber().num,
                 .addr_space_id = 0,
             };
@@ -138,9 +142,18 @@ pub fn PageTable(level: VirtAddr.Level) type {
             try child.mapPage(allocator, vpn, leaf_entry);
         }
 
-        pub const Entry = packed struct(u32) {
+        pub const Entry = packed struct(u64) {
             flags: common.Flags,
             ppn: PhysAddr.PageNumber,
+            _: u7 = 0,
+            type: MemoryType = .physical_memory_attributes,
+            napot: bool = false,
+
+            pub const MemoryType = enum(u2) {
+                physical_memory_attributes = 0,
+                non_cachable = 1,
+                io = 2,
+            };
 
             pub fn init(ppn: PhysAddr.PageNumber, comptime flags: common.Flags) Entry {
                 comptime flags.assertValid();

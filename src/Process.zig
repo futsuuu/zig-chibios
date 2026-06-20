@@ -37,7 +37,11 @@ fn init(
     };
     for (kernel_page) |*page| {
         const ppn: arch.mmu.PhysAddr.PageNumber = .fromPtr(page);
-        try self.page_table.mapPage(allocator, @bitCast(@as(u20, @intCast(ppn.num))), .init(ppn, .rwx));
+        try self.page_table.mapPage(
+            allocator,
+            @bitCast(@as(@Int(.unsigned, @bitSizeOf(arch.mmu.VirtAddr.PageNumber)), @intCast(ppn.num))),
+            .init(ppn, .rwx),
+        );
     }
     return self;
 }
@@ -74,7 +78,7 @@ pub const Scheduler = struct {
         kernel_page: []align(page_size) [page_size]u8,
     ) Allocator.Error!Scheduler {
         var list: std.ArrayList(Process) = try .initCapacity(allocator, 1);
-        list.appendAssumeCapacity(try .init(allocator, 0, 64, kernel_page));
+        list.appendAssumeCapacity(try .init(allocator, 0, 128, kernel_page));
         return .{
             .list = list,
             .idle = 0,
