@@ -7,10 +7,11 @@ fn Register(name: @EnumLiteral(), T: type) type {
         pub const Format = if (hasDecl("Format")) T.Format else T;
 
         pub inline fn read() T {
-            return decode(asm volatile ("csrr %[ret], " ++ @tagName(name)
+            return decode(asm ("csrr %[ret], " ++ @tagName(name)
                 : [ret] "=r" (-> Format),
             ));
         }
+
         pub inline fn write(value: T) void {
             asm volatile ("csrw " ++ @tagName(name) ++ ", %[value]"
                 :
@@ -21,6 +22,7 @@ fn Register(name: @EnumLiteral(), T: type) type {
         inline fn encode(value: T) Format {
             return if (comptime hasDecl("encode")) T.encode(value) else value;
         }
+
         inline fn decode(value: Format) T {
             return if (comptime hasDecl("decode")) T.decode(value) else value;
         }
