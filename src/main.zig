@@ -6,6 +6,7 @@ const kernel = @import("kernel");
 const shared = @import("shared");
 const virtio = @import("virtio");
 
+pub const debug = kernel.debug;
 pub const panic = kernel.panic;
 pub const std_options = kernel.std_options;
 pub const std_options_debug_io = kernel.std_options_debug_io;

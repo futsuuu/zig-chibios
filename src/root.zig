@@ -7,6 +7,24 @@ const shared = @import("shared");
 
 pub const Process = @import("Process.zig");
 
+pub const debug = struct {
+    pub const SelfInfo = @import("DummySelfInfo.zig");
+
+    pub fn printLineFromFile(io: std.Io, w: *std.Io.Writer, src: std.debug.SourceLocation) !void {
+        _ = io;
+        try w.print("{any}", .{src});
+    }
+};
+
+pub fn printPanicInfo(msg: []const u8, first_trace_addr: ?usize) void {
+    @branchHint(.cold);
+    log.err("PANIC at 0x{x}: {s}", .{ first_trace_addr orelse 0, msg });
+    std.debug.dumpCurrentStackTrace(.{
+        .first_address = first_trace_addr,
+        .allow_unsafe_unwind = true,
+    });
+}
+
 pub const panic = std.debug.FullPanic(struct {
     fn panic(msg: []const u8, first_trace_addr: ?usize) noreturn {
         @branchHint(.cold);
@@ -21,22 +39,6 @@ pub const std_options: std.Options = .{
 };
 
 pub const std_options_debug_io = shared.minimum_debug_io.init(arch.riscv.sbi.debug_console.writer());
-
-pub fn printPanicInfo(msg: []const u8, first_trace_addr: ?usize) void {
-    @branchHint(.cold);
-    log.err("PANIC: {s}", .{msg});
-    _ = first_trace_addr;
-    // FIXME: replace StackIterator with captureCurrentStackTrace
-    // var iter: std.debug.StackIterator = .init(first_trace_addr, null);
-    // var index: usize = 0;
-    // while (iter.next()) |addr| : (index += 1) {
-    //     switch (builtin.target.ptrBitWidth()) {
-    //         32 => log.err("{:0>3}: 0x{x:0>8}", .{ index, addr }),
-    //         64 => log.err("{:0>3}: 0x{x:0>16}", .{ index, addr }),
-    //         else => unreachable,
-    //     }
-    // }
-}
 
 comptime {
     std.testing.refAllDecls(@This());
