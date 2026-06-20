@@ -42,11 +42,6 @@ pub fn build(b: *std.Build) void {
 
     const kernel_mod = b.createModule(.{
         .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
-        .no_builtin = true,
-        .strip = false,
-        .stack_protector = false,
         .imports = &.{
             .{ .name = "arch", .module = arch_mod },
             .{ .name = "shared", .module = shared_mod },
@@ -59,6 +54,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
+            .code_model = .medany,
             .no_builtin = true,
             .strip = false,
             .stack_protector = false,
@@ -129,13 +125,13 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/arch/root.zig"),
             .target = target,
             .optimize = opts.optimize,
+            .code_model = .medany,
             .no_builtin = true,
             .strip = false,
             .stack_protector = false,
             .imports = &.{
                 .{ .name = "shared", .module = shared_mod },
             },
-            .code_model = .medany,
         });
         arch_tests_mod.addImport("arch", arch_tests_mod);
         const arch_tests = b.addTest(.{
