@@ -95,7 +95,7 @@ pub fn build(b: *std.Build) void {
     run_cmd.addArgs(&common_qemu_args);
     run_cmd.addArgs(&.{
         "-global", "virtio-mmio.force-legacy=false",
-        "-drive",  "id=drive0,file=./disk/lorem.txt,format=raw,if=none",
+        "-drive",  "id=drive0,file=fat:./disk,format=raw,media=disk,if=none,readonly=true",
         "-device", "virtio-blk-device,drive=drive0,packed=true",
         "-netdev", "user,id=net0",
         "-device", "virtio-net-device,netdev=net0,packed=true",

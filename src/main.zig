@@ -121,11 +121,16 @@ pub fn main(hartid: usize, devicetree_addr: usize, mem: arch.riscv.kernel.Memory
             },
             .block => |*virtio_blk| {
                 defer virtio_blk.deinit();
-                log.info("writing message in {s}", .{fdt_node.name});
                 var buf = std.mem.zeroes([512]u8);
                 try virtio_blk.request(.read, &buf, 0);
-                @memcpy(buf[0..].ptr, "hello world!");
-                try virtio_blk.request(.write, &buf, 0);
+                const mbr: *const shared.partition.Mbr = @ptrCast(&buf);
+                for (mbr.partitions, 0..) |part, i| {
+                    if (part.type == .free) continue;
+                    try virtio_blk.request(.read, &buf, part.offset.toNative());
+                    if (!part.type.isFat()) continue;
+                    const bootsector: *const shared.fat.BootSector = @ptrCast(&buf);
+                    log.debug("{}: FAT type: {}", .{ i, bootsector.detectType() });
+                }
             },
         }
     }

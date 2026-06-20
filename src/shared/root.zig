@@ -5,9 +5,11 @@ pub const bytes = @import("bytes.zig");
 const endian = @import("endian.zig");
 pub const Be = endian.Big;
 pub const Le = endian.Little;
+pub const fat = @import("fat.zig");
 pub const heap = @import("heap.zig");
 pub const minimum_debug_io = @import("minimum_debug_io.zig");
 pub const net = @import("net.zig");
+pub const partition = @import("partition.zig");
 
 comptime {
     std.testing.refAllDecls(@This());
