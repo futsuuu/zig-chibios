@@ -2,7 +2,7 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{ .default_target = .{
-        .cpu_arch = .riscv32,
+        .cpu_arch = .riscv64,
         .os_tag = .freestanding,
         .ofmt = .elf,
     } });

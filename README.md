@@ -11,7 +11,7 @@ zig build run
 Dependencies:
 
 - Zig
-- QEMU for 32bit RISC-V (qemu-system-riscv32)
+- QEMU for RISC-V (qemu-system-riscv32 or qemu-system-riscv64)
 
 ## References
 
