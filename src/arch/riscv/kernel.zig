@@ -2,11 +2,11 @@ const root = @import("root");
 const std = @import("std");
 const page_size = std.heap.pageSize();
 
-const trap = @import("trap.zig");
+const arch = @import("../root.zig");
 
 const bss = @extern([*]u8, .{ .name = "__bss" });
 const bss_end = @extern([*]u8, .{ .name = "__bss_end" });
-const stack_top = @extern(*u8, .{ .name = "__stack_top" });
+const stack_top = @extern(*align(arch.stack_unit_size) u8, .{ .name = "__stack_top" });
 const kernel_page = @extern([*]align(page_size) [page_size]u8, .{ .name = "__kernel_page" });
 const kernel_page_end = @extern([*]align(page_size) [page_size]u8, .{ .name = "__kernel_page_end" });
 const free_ram = @extern([*]u8, .{ .name = "__free_ram" });
@@ -29,8 +29,8 @@ export fn _start() linksection(".text.boot") callconv(.naked) noreturn {
 /// https://docs.kernel.org/arch/riscv/boot.html
 export fn kernelMain(hartid: usize, devicetree_addr: usize) callconv(.c) noreturn {
     @memset(bss[0 .. bss_end - bss], 0);
-    trap.initHandler();
-    trap.saveCurrentKernelStack(stack_top);
+    arch.trap.initHandler();
+    arch.trap.saveCurrentKernelStack(stack_top);
     const mem: Memory = .{
         .kernel_page = kernel_page[0 .. kernel_page_end - kernel_page],
         .free_ram = free_ram[0 .. free_ram_end - free_ram],

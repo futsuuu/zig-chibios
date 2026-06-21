@@ -1,7 +1,9 @@
 const std = @import("std");
 
+const arch = @import("../root.zig");
+const csr = arch.riscv.csr;
+
 const asm_utils = @import("asm_utils.zig");
-const csr = @import("csr.zig");
 
 pub fn initHandler() void {
     csr.stvec.write(.{
@@ -10,7 +12,7 @@ pub fn initHandler() void {
     });
 }
 
-pub fn saveCurrentKernelStack(stack_top: *const anyopaque) void {
+pub fn saveCurrentKernelStack(stack_top: *align(arch.stack_unit_size) const anyopaque) void {
     csr.sscratch.write(@intFromPtr(stack_top));
 }
 
@@ -25,7 +27,7 @@ fn kernelEntry() align(4) callconv(.naked) noreturn {
             \\
             // frame: Frame = .{ ... };
             // sp = &frame;
-            \\ addi sp, sp, -31 * {[xlenb]}
+            \\ addi sp, sp, -{[sizeof_frame]}
             \\ {[sX]s} ra,   0 * {[xlenb]}(sp)
             \\ {[sX]s} gp,   1 * {[xlenb]}(sp)
             \\ {[sX]s} tp,   2 * {[xlenb]}(sp)
@@ -62,7 +64,7 @@ fn kernelEntry() align(4) callconv(.naked) noreturn {
             \\ {[sX]s} a0,  30 * {[xlenb]}(sp)
             \\
             // sscratch = kernel_stack_top;
-            \\ addi a0, sp, 31 * {[xlenb]}
+            \\ addi a0, sp, {[sizeof_frame]}
             \\ csrw sscratch, a0
             \\
             // handleTrap(&frame);
@@ -105,6 +107,7 @@ fn kernelEntry() align(4) callconv(.naked) noreturn {
             .lX = asm_utils.load_xlen,
             .sX = asm_utils.store_xlen,
             .xlenb = asm_utils.xlenb,
+            .sizeof_frame = @sizeOf(Frame),
         }));
 }
 
@@ -137,4 +140,9 @@ const Frame = extern struct {
     a: [8]usize,
     s: [12]usize,
     sp: usize,
+    _: usize,
+
+    comptime {
+        _ = @divExact(@sizeOf(Frame), arch.stack_unit_size);
+    }
 };

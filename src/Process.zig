@@ -9,7 +9,7 @@ const Process = @This();
 
 state: State,
 page_table: arch.mmu.PageTable(.root),
-stack: []align(@alignOf(usize)) u8,
+stack: []align(arch.stack_unit_size) [arch.stack_unit_size]u8,
 context: arch.Context,
 
 const State = enum { unused, runnable };
@@ -27,7 +27,11 @@ fn init(
     stack_size: usize,
     kernel_page: []align(page_size) [page_size]u8,
 ) Allocator.Error!Process {
-    const stack = try allocator.alignedAlloc(u8, .of(usize), stack_size);
+    const stack = try allocator.alignedAlloc(
+        [arch.stack_unit_size]u8,
+        .fromByteUnits(arch.stack_unit_size),
+        (stack_size + arch.stack_unit_size - 1) / arch.stack_unit_size,
+    );
     errdefer allocator.free(stack);
     var self: Process = .{
         .state = .runnable,

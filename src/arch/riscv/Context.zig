@@ -1,19 +1,22 @@
 const std = @import("std");
 
+const arch = @import("../root.zig");
 const asm_utils = @import("asm_utils.zig");
 
 const Context = @This();
 
-stack_ptr: *const Registers,
+stack_ptr: *align(arch.stack_unit_size) const Registers,
 
 const Registers = extern struct {
     ra: usize,
     s: [12]usize = @splat(0),
+    _: [3]usize = @splat(0),
+
+    const stack_unit_count = @divExact(@sizeOf(Registers), arch.stack_unit_size);
 };
 
-pub fn init(stack: []align(@alignOf(usize)) u8, return_address: usize) Context {
-    const stack_usize = @as([*]usize, @ptrCast(stack))[0 .. stack.len / @sizeOf(usize)];
-    const reg: *Registers = @ptrCast(&stack_usize[stack_usize.len - @sizeOf(Registers) / @sizeOf(usize)]);
+pub fn init(stack: []align(arch.stack_unit_size) [arch.stack_unit_size]u8, return_address: usize) Context {
+    const reg: *align(arch.stack_unit_size) Registers = @ptrCast(&stack[stack.len - Registers.stack_unit_count]);
     reg.* = .{
         .ra = return_address,
     };
@@ -23,13 +26,13 @@ pub fn init(stack: []align(@alignOf(usize)) u8, return_address: usize) Context {
 }
 
 test init {
-    var stack: [1024]u8 align(@alignOf(usize)) = undefined;
+    var stack: [64][arch.stack_unit_size]u8 align(arch.stack_unit_size) = undefined;
     _ = Context.init(&stack, 7);
-    const s = @as([*]usize, @ptrCast(&stack))[0 .. stack.len / @sizeOf(usize)];
-    try std.testing.expect(7 == s[s.len - 13]);
-    try std.testing.expect(0 == s[s.len - 12]);
-    try std.testing.expect(0 == s[s.len - 2]);
-    try std.testing.expect(0 == s[s.len - 1]);
+    const s = @as([*]usize, @ptrCast(&stack))[0 .. @sizeOf(@TypeOf(stack)) / @sizeOf(usize)];
+    try std.testing.expectEqual(7, s[s.len - 16]);
+    try std.testing.expectEqual(0, s[s.len - 15]);
+    try std.testing.expectEqual(0, s[s.len - 4]);
+    try std.testing.expectEqual(0, s[s.len - 1]);
 }
 
 pub fn overwrite(self: Context) void {
@@ -48,11 +51,12 @@ pub fn overwrite(self: Context) void {
             \\ {[lX]s} s9,  10 * {[xlenb]}(sp)
             \\ {[lX]s} s10, 11 * {[xlenb]}(sp)
             \\ {[lX]s} s11, 12 * {[xlenb]}(sp)
-            \\ addi sp, sp, 13 * {[xlenb]}
+            \\ addi sp, sp, {[sizeof_registers]}
             \\ ret
         , .{
             .lX = asm_utils.load_xlen,
             .xlenb = asm_utils.xlenb,
+            .sizeof_registers = @sizeOf(Registers),
         })
         :
         : [next] "r" (&self.stack_ptr),
@@ -74,7 +78,7 @@ fn swtch(
     // next: *const sp,
 ) callconv(.naked) noreturn {
     asm volatile (std.fmt.comptimePrint(
-            \\ addi sp, sp, -13 * {[xlenb]}
+            \\ addi sp, sp, -{[sizeof_registers]}
             \\ {[sX]s} ra,   0 * {[xlenb]}(sp)
             \\ {[sX]s} s0,   1 * {[xlenb]}(sp)
             \\ {[sX]s} s1,   2 * {[xlenb]}(sp)
@@ -105,12 +109,13 @@ fn swtch(
             \\ {[lX]s} s9,  10 * {[xlenb]}(sp)
             \\ {[lX]s} s10, 11 * {[xlenb]}(sp)
             \\ {[lX]s} s11, 12 * {[xlenb]}(sp)
-            \\ addi sp, sp, 13 * {[xlenb]}
+            \\ addi sp, sp, {[sizeof_registers]}
             \\ ret
         , .{
             .lX = asm_utils.load_xlen,
             .sX = asm_utils.store_xlen,
             .xlenb = asm_utils.xlenb,
+            .sizeof_registers = @sizeOf(Registers),
         }) ::: .{ .memory = true });
 }
 
@@ -131,10 +136,10 @@ test "switch context multiple times" {
             }
         }
     };
-    var stack_a: [1024]u8 align(@alignOf(usize)) = undefined;
+    var stack_a: [64][arch.stack_unit_size]u8 align(arch.stack_unit_size) = undefined;
     mod.cx_a = .init(&stack_a, @intFromPtr(&mod.entryA));
-    var stack_b: [1024]u8 align(@alignOf(usize)) = undefined;
+    var stack_b: [64][arch.stack_unit_size]u8 align(arch.stack_unit_size) = undefined;
     mod.cx_b = .init(&stack_b, @intFromPtr(&mod.entryB));
     @call(.never_inline, mod.entryA, .{});
-    try std.testing.expect(mod.counter == 45678);
+    try std.testing.expectEqual(mod.counter, 45678);
 }

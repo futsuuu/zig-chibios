@@ -24,13 +24,14 @@ SECTIONS {
     __bss_end = .;
   }
 
-  . = ALIGN(8);
-  . += 128 * 1024;  /* 128KB */
+  /* stack pointer should be aligned to a 128-bit boundary */
+  . = ALIGN(16);
+  . += 128 * 1024;  /* 128KiB */
   __stack_top = .;
 
   . = ALIGN(4096);
   __free_ram = .;
-  . += 64 * 1024 * 1024;  /* 64MB */
+  . += 64 * 1024 * 1024;  /* 64MiB */
   __free_ram_end = .;
 
   __kernel_page_end = .;
