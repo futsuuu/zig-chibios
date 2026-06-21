@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const xlen = @bitSizeOf(usize);
+
 fn call(
     comptime eid: usize,
     comptime fid: usize,
@@ -97,7 +99,7 @@ pub const base = struct {
         const Format = packed struct(usize) {
             minor: u24,
             major: u7,
-            reserved: if (@bitSizeOf(usize) == 32) u1 else u33,
+            reserved: if (xlen == 32) u1 else u33,
         };
         const ret = call(eid, 0, Format, 0, 0, 0, 0, 0, 0) catch unreachable;
         std.debug.assert(ret.reserved == 0);
@@ -115,8 +117,14 @@ pub const base = struct {
 
 /// SBI version >= 0.1
 pub const legacy = struct {
+    pub fn setTimer(stime_value: u64) error{SbiFailed}!void {
+        if (callLegacy(0, @truncate(stime_value), @truncate(stime_value >> xlen), 0, 0, 0, 0) != 0) {
+            return error.SbiFailed;
+        }
+    }
+
     pub fn putChar(char: u8) error{SbiFailed}!void {
-        if (callLegacy(1, @intCast(char), 0, 0, 0, 0, 0) != 0) {
+        if (callLegacy(1, char, 0, 0, 0, 0, 0) != 0) {
             return error.SbiFailed;
         }
     }
@@ -126,6 +134,20 @@ pub const legacy = struct {
         _ = callLegacy(8, 0, 0, 0, 0, 0, 0);
         return error.SbiFailed;
     }
+};
+
+/// SBI version >= 0.2
+pub const timer = struct {
+    const eid = 0x54494D45;
+
+    pub fn set(stime_value: u64) error{SbiFailed}!void {
+        _ = call(eid, 0, usize, @truncate(stime_value), @truncate(stime_value >> xlen), 0, 0, 0, 0) catch |e| switch (e) {
+            error.NotSupported => {
+                try legacy.setTimer(stime_value);
+            },
+            else => unreachable,
+        };
+ }
 };
 
 /// SBI version >= 0.3
