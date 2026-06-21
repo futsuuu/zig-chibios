@@ -1,6 +1,16 @@
 const std = @import("std");
 
-const Error = error{
+fn call(
+    comptime eid: usize,
+    comptime fid: usize,
+    comptime Ret: type,
+    arg0: usize,
+    arg1: usize,
+    arg2: usize,
+    arg3: usize,
+    arg4: usize,
+    arg5: usize,
+) error{
     Failed,
     NotSupported,
     InvalidParam,
@@ -15,19 +25,7 @@ const Error = error{
     Timeout,
     Io,
     DeniedLocked,
-};
-
-fn call(
-    comptime eid: usize,
-    comptime fid: usize,
-    comptime Ret: type,
-    arg0: usize,
-    arg1: usize,
-    arg2: usize,
-    arg3: usize,
-    arg4: usize,
-    arg5: usize,
-) Error!Ret {
+}!Ret {
     std.debug.assert(@sizeOf(Ret) == @sizeOf(usize));
     var err: isize = undefined;
     var val: Ret = undefined;
@@ -88,7 +86,7 @@ fn callLegacy(
 }
 
 test "error code" {
-    try std.testing.expect(call(base.eid, 99999, usize, 0, 0, 0, 0, 0, 0) == error.NotSupported);
+    try std.testing.expectError(error.NotSupported, call(base.eid, 99999, usize, 0, 0, 0, 0, 0, 0));
 }
 
 /// SBI version >= 0.2
@@ -117,16 +115,16 @@ pub const base = struct {
 
 /// SBI version >= 0.1
 pub const legacy = struct {
-    pub fn putChar(char: u8) Error!void {
+    pub fn putChar(char: u8) error{SbiFailed}!void {
         if (callLegacy(1, @intCast(char), 0, 0, 0, 0, 0) != 0) {
-            return error.Failed;
+            return error.SbiFailed;
         }
     }
 
-    pub fn shutdown() noreturn {
+    pub fn shutdown() error{SbiFailed}!noreturn {
         @branchHint(.cold);
         _ = callLegacy(8, 0, 0, 0, 0, 0, 0);
-        unreachable;
+        return error.SbiFailed;
     }
 };
 
@@ -147,13 +145,15 @@ pub const system = struct {
         _,
     };
 
-    pub fn reset(ty: ResetType, reason: ResetReason) Error!noreturn {
+    pub fn reset(ty: ResetType, reason: ResetReason) error{ InvalidSbiParam, SbiFailed }!noreturn {
         @branchHint(.cold);
         _ = call(eid, 0, usize, @intFromEnum(ty), @intFromEnum(reason), 0, 0, 0, 0) catch |e| switch (e) {
             error.NotSupported => {
-                legacy.shutdown();
+                try legacy.shutdown();
             },
-            else => return e,
+            error.InvalidParam => return error.InvalidSbiParam,
+            error.Failed => return error.SbiFailed,
+            else => unreachable,
         };
         unreachable;
     }
@@ -161,25 +161,29 @@ pub const system = struct {
 
 /// SBI version >= 2.0
 pub const debug_console = struct {
-    const eid = 0x4442434e;
+    const eid = 0x4442434E;
 
-    pub fn write(bytes: []const u8) Error!void {
+    pub fn write(bytes: []const u8) (error { InvalidSbiParam, NoWritableConsole } || std.Io.Writer.Error)!void {
         _ = call(eid, 0, usize, bytes.len, @intFromPtr(bytes.ptr), 0, 0, 0, 0) catch |e| switch (e) {
             error.NotSupported => {
-                for (bytes) |byte| {
-                    _ = try legacy.putChar(byte);
-                }
+                for (bytes) |byte| try writeByte(byte);
             },
-            else => return e,
+            error.InvalidParam => return error.InvalidSbiParam,
+            error.Denied => return error.NoWritableConsole,
+            error.Failed => return error.WriteFailed,
+            else => unreachable,
         };
     }
 
-    pub fn writeByte(byte: u8) Error!void {
+    pub fn writeByte(byte: u8) (error { InvalidSbiParam, NoWritableConsole } || std.Io.Writer.Error)!void {
         _ = call(eid, 2, usize, @intCast(byte), 0, 0, 0, 0, 0) catch |e| switch (e) {
             error.NotSupported => {
-                _ = try legacy.putChar(byte);
+                _ = legacy.putChar(byte) catch return error.WriteFailed;
             },
-            else => return e,
+            error.InvalidParam => return error.InvalidSbiParam,
+            error.Denied => return error.NoWritableConsole,
+            error.Failed => return error.WriteFailed,
+            else => unreachable,
         };
     }
 
