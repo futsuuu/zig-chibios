@@ -8,7 +8,7 @@ const Le = @import("shared").Le;
 const virtio = @import("root.zig");
 
 pub const RegisterHeader = struct {
-    pub const expected_magic: u32 = @bitCast(std.mem.nativeToLittle([4]u8, "virt".*));
+    pub const expected_magic: u32 = 0x74726976;
     pub const expected_version: u32 = 2;
 
     magic: RegisterField(0x00, .r, u32),
@@ -18,7 +18,7 @@ pub const RegisterHeader = struct {
     pub fn init(addr: usize) error{ InvalidDevice, UnsupportedDevice }!*const RegisterHeader {
         const self: *const RegisterHeader = @ptrFromInt(addr);
         if (self.magic.read() != expected_magic) {
-            log.err("invalid magic value 0x{X}", .{self.magic.read()});
+            log.err("invalid magic value: expected 0x{X}, got 0x{X}", .{ expected_magic, self.magic.read() });
             return error.InvalidDevice;
         }
         if (self.version.read() != expected_version) {
