@@ -93,7 +93,12 @@ pub fn PageTable(level: VirtAddr.Level) type {
         }
 
         pub fn deinit(self: Self, allocator: Allocator) void {
-            allocator.free(@as([]Entry, self.entries));
+            if (level != .lv0) {
+                for (self.entries) |entry| if (entry.getPointedTable()) |child| {
+                    child.deinit(allocator);
+                };
+            }
+            allocator.free(@as([]align(page_size) Entry, self.entries));
         }
 
         pub fn activate(self: PageTable(.root)) void {
@@ -134,7 +139,7 @@ pub fn PageTable(level: VirtAddr.Level) type {
                 entry.* = leaf_entry;
                 return;
             }
-            const child: PageTable(level.lower()) = if (entry.flags.valid) .fromPageNumber(entry.ppn) else b: {
+            const child = entry.getPointedTable() orelse b: {
                 const child: PageTable(level.lower()) = try .init(allocator);
                 entry.* = .init(child.getPageNumber(), .ptr);
                 break :b child;
@@ -158,6 +163,10 @@ pub fn PageTable(level: VirtAddr.Level) type {
             pub fn init(ppn: PhysAddr.PageNumber, comptime flags: common.Flags) Entry {
                 comptime flags.assertValid();
                 return .{ .ppn = ppn, .flags = flags };
+            }
+
+            pub fn getPointedTable(self: Entry) ?PageTable(level.lower()) {
+                return if (self.flags.valid) .fromPageNumber(self.ppn) else null;
             }
         };
     };
