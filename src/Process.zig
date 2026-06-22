@@ -50,17 +50,10 @@ fn init(
     return self;
 }
 
-fn deinit(self: *Process, allocator: Allocator, next: ?*const Process) void {
-    if (next) |p| {
-        p.page_table.activate();
-    }
+fn deinit(self: *Process, allocator: Allocator) void {
     self.page_table.deinit(allocator);
     allocator.free(self.stack);
     self.* = .uninit;
-    if (next) |p| {
-        arch.trap.saveCurrentKernelStack(p.stack[p.stack.len..].ptr);
-        p.context.overwrite();
-    }
 }
 
 fn switchContext(self: *Process, next: *const Process) void {
@@ -73,6 +66,7 @@ pub const Scheduler = struct {
     list: std.ArrayList(Process),
     current: usize,
     idle: usize,
+    prev_exited: ?usize = null,
 
     allocator: std.mem.Allocator,
     kernel_page: []align(page_size) [page_size]u8,
@@ -103,10 +97,15 @@ pub const Scheduler = struct {
         const prev = &self.list.items[self.current];
         self.current = next - self.list.items.ptr;
         prev.switchContext(next);
+        if (self.prev_exited) |i| {
+            self.list.items[i].deinit(self.allocator);
+            self.prev_exited = null;
+        }
     }
 
     pub fn exit(self: *Scheduler) void {
-        self.list.items[self.current].deinit(self.allocator, self.getNext());
+        self.list.items[self.current].state = .unused;
+        self.prev_exited = self.current;
     }
 
     fn getNext(self: *Scheduler) ?*Process {
