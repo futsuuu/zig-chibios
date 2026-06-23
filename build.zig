@@ -95,13 +95,14 @@ pub fn build(b: *std.Build) void {
     run_cmd.addArgs(&common_qemu_args);
     run_cmd.addArgs(&.{
         "-global", "virtio-mmio.force-legacy=false",
-        "-drive",  "id=drive0,file=fat:./disk,format=raw,media=disk,if=none,readonly=true",
+        "-drive",  "id=drive0,file=fat:./zig-out/bin,format=raw,media=disk,if=none,readonly=true",
         "-device", "virtio-blk-device,drive=drive0,packed=true",
         "-netdev", "user,id=net0",
         "-device", "virtio-net-device,netdev=net0,packed=true",
     });
     run_cmd.addArg("-kernel");
     run_cmd.addArtifactArg(kernel_elf);
+    run_cmd.step.dependOn(b.getInstallStep()); // creates /zig-out directory
     run_step.dependOn(&run_cmd.step);
 
     for ([_]struct {
