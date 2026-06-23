@@ -92,6 +92,10 @@ fn nextAvailable(self: *Queue) DescriptorIndex {
     };
 }
 
+fn usedWrap(self: *const Queue) bool {
+    return (self.used_counter / self.desc_ring.len) % 2 == 0;
+}
+
 pub fn notify(self: *Queue) void {
     arch.barrier.full();
     if (self.device_event.getEnabled()) |_| {
@@ -167,10 +171,9 @@ const DescriptorChain = struct {
     }
 };
 
-pub fn isUsed(self: Queue, desc: *const volatile Descriptor) bool {
-    _ = self;
+pub fn isUsed(self: *const Queue, desc: *const volatile Descriptor) bool {
     const flags = desc.flags.toNative();
-    return flags.used == flags.available;
+    return flags.available == self.usedWrap() and flags.used == self.usedWrap();
 }
 
 pub const Descriptor = packed struct(u128) {
