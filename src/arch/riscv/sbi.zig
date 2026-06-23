@@ -147,7 +147,7 @@ pub const timer = struct {
             },
             else => unreachable,
         };
- }
+    }
 };
 
 /// SBI version >= 0.3
@@ -185,7 +185,7 @@ pub const system = struct {
 pub const debug_console = struct {
     const eid = 0x4442434E;
 
-    pub fn write(bytes: []const u8) (error { InvalidSbiParam, NoWritableConsole } || std.Io.Writer.Error)!void {
+    pub fn write(bytes: []const u8) (error{ InvalidSbiParam, NoWritableConsole } || std.Io.Writer.Error)!void {
         _ = call(eid, 0, usize, bytes.len, @intFromPtr(bytes.ptr), 0, 0, 0, 0) catch |e| switch (e) {
             error.NotSupported => {
                 for (bytes) |byte| try writeByte(byte);
@@ -197,7 +197,7 @@ pub const debug_console = struct {
         };
     }
 
-    pub fn writeByte(byte: u8) (error { InvalidSbiParam, NoWritableConsole } || std.Io.Writer.Error)!void {
+    pub fn writeByte(byte: u8) (error{ InvalidSbiParam, NoWritableConsole } || std.Io.Writer.Error)!void {
         _ = call(eid, 2, usize, @intCast(byte), 0, 0, 0, 0, 0) catch |e| switch (e) {
             error.NotSupported => {
                 _ = legacy.putChar(byte) catch return error.WriteFailed;
