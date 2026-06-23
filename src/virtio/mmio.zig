@@ -137,8 +137,8 @@ pub const SelectedQueueRegister = struct {
 };
 
 fn splitAddr(addr: usize) struct { u32, u32 } {
-    return switch (comptime builtin.target.ptrBitWidth()) {
-        32 => .{ 0, @intCast(addr) },
+    return switch (@bitSizeOf(usize)) {
+        32 => .{ 0, addr },
         64 => .{ @intCast(addr >> 32), @truncate(addr) },
         else => unreachable,
     };
@@ -150,9 +150,9 @@ pub const QueueNotifier = packed struct(u32) {
     vq_index: u16,
     /// Used when VIRTIO_F_NOTIFICATION_DATA has been negotiated.
     data: packed struct(u16) {
-        next_offset: u15,
-        next_wrap: bool,
-    },
+        next_offset: u15 = 0,
+        next_wrap: bool = false,
+    } = .{},
 };
 
 fn RegisterField(offset: usize, direction: enum { r, w, rw }, T: type) type {

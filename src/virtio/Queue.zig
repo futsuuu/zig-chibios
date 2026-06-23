@@ -95,7 +95,7 @@ fn nextAvailable(self: *Queue) DescriptorIndex {
 pub fn notify(self: *Queue) void {
     arch.barrier.full();
     if (self.device_event.getEnabled()) |_| {
-        self.register.queue_notify.write(.{ .vq_index = self.index, .data = undefined });
+        self.register.queue_notify.write(.{ .vq_index = self.index });
     }
 }
 
