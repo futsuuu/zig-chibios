@@ -57,6 +57,7 @@ pub fn waitUsed(self: *Queue) *const volatile Descriptor {
     while (!self.isUsed(desc)) {
         std.atomic.spinLoopHint();
     }
+    arch.barrier.read();
     const id: u15 = @intCast(desc.id.toNative());
     self.used_counter += self.chain_length_map[id];
     self.buffer_id_pool.release(id);
