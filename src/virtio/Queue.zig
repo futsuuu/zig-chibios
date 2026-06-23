@@ -38,8 +38,8 @@ pub fn init(arena: std.mem.Allocator, index: u16, register: *virtio.mmio.Registe
     driver_event.* = .init;
     queue_register.size.write(@intCast(desc_ring.len));
     queue_register.setAddr(.desc, @intFromPtr(desc_ring.ptr));
-    queue_register.setAddr(.driver, @intFromPtr(device_event));
-    queue_register.setAddr(.device, @intFromPtr(driver_event));
+    queue_register.setAddr(.driver, @intFromPtr(driver_event));
+    queue_register.setAddr(.device, @intFromPtr(device_event));
     queue_register.ready.write(1);
     return .{
         .index = index,
