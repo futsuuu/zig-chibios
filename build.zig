@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
     });
 
     const kernel_mod = b.createModule(.{
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = b.path("src/kernel/root.zig"),
         .imports = &.{
             .{ .name = "arch", .module = arch_mod },
             .{ .name = "shared", .module = shared_mod },
@@ -51,7 +51,7 @@ pub fn build(b: *std.Build) void {
     const kernel_elf = b.addExecutable(.{
         .name = "kernel.elf",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
+            .root_source_file = b.path("src/kernel/main.zig"),
             .target = target,
             .optimize = optimize,
             .code_model = .medany,
@@ -138,7 +138,10 @@ pub fn build(b: *std.Build) void {
         const arch_tests = b.addTest(.{
             .name = opts.name,
             .root_module = arch_tests_mod,
-            .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
+            .test_runner = .{
+                .path = b.path("src/test_runner.zig"),
+                .mode = .simple,
+            },
         });
         arch_tests.setLinkerScript(b.path("src/arch/riscv/kernel.ld"));
         arch_tests.setExecCmd(&([_]?[]const u8{qemu} ++ common_qemu_args ++ .{ "-kernel", null }));
