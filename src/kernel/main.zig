@@ -131,17 +131,10 @@ pub fn main(hartid: usize, devicetree_addr: usize, mem: arch.riscv.kernel.Memory
                     var reader: shared.bytes.fixed.Readable = .init(&buf);
                     const boot_sector: shared.fat.BootSector = try .readFrom(&reader, part.offset.toNative());
                     log.debug("{}: {s}", .{ i, boot_sector.volume_label });
-                    log.debug("{}", .{boot_sector});
                     try virtio_blk.request(.read, &buf, boot_sector.first_root_dir_sector);
                     reader = .init(&buf);
-                    while (true) {
-                        const dirent: shared.fat.DirectoryEntry = try .readFrom(&reader);
-                        log.debug("{f}", .{dirent});
-                        switch (dirent) {
-                            .free => break,
-                            .removed => continue,
-                            else => {},
-                        }
+                    while (try shared.fat.CombinedDirectoryEntry.readFrom(&reader)) |ent| {
+                        log.debug("{f}", .{ent});
                     }
                 }
             },

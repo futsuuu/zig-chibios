@@ -27,153 +27,6 @@ fn Magic(Int: type, expected: Int) type {
     };
 }
 
-pub const BootSectorFormat = extern struct {
-    comptime {
-        std.debug.assert(512 == @sizeOf(BootSectorFormat));
-    }
-
-    jmp_boot: [3]u8,
-    oem_name: [8]u8,
-    bytes_per_sector: Le(u16) align(1),
-    sectors_per_cluster: u8,
-    reserved_sector_count: Le(u16) align(1),
-    fat_count: u8,
-    root_entry_count: Le(u16) align(1),
-    /// - FAT12/16: valid only when total_sectors < 0x10000
-    /// - FAT32: always invalid
-    total_sectors_16: Le(u16) align(1),
-    media: u8,
-    /// - FAT12/16: always valid
-    /// - FAT32: always invalid
-    fat_size_16: Le(u16) align(1),
-    sectors_per_track: Le(u16) align(1),
-    head_count: Le(u16) align(1),
-    hidden_sectors: Le(u32) align(1),
-    /// - FAT12/16: valid only when total_sectors >= 0x10000
-    /// - FAT32: always valid
-    total_sectors_32: Le(u32) align(1),
-    type: extern union {
-        fat12: Fat12Or16Specific,
-        fat16: Fat12Or16Specific,
-        fat32: Fat32Specific,
-    },
-    signature: Le(Magic(u16, 0xAA55)) align(1),
-    // Remaining bytes are filled by 0.
-
-    pub const Fat12Or16Specific = extern struct {
-        drive_num: u8,
-        _bs_reserved: u8 = 0,
-        /// This should be validated before accessing the following 3 fields.
-        boot_signature: Magic(u8, 0x29),
-        volume_id: Le(u32) align(1),
-        volume_label: [11]u8,
-        fs_name: [8]u8,
-        boot_code: [448]u8,
-    };
-
-    pub const Fat32Specific = extern struct {
-        fat_size_32: Le(u32) align(1),
-        ext_flags: Le(u16) align(1),
-        fs_version: Le(u16) align(1),
-        root_cluster: Le(u32) align(1),
-        fs_info: Le(u16) align(1),
-        boot_sector_backup: Le(u16) align(1),
-        _bpb_reserved: [12]u8 = @splat(0),
-        drive_num: u8,
-        _bs_reserved: u8 = 0,
-        /// This should be validated before accessing the following 3 fields.
-        boot_signature: Magic(u8, 0x29),
-        volume_id: Le(u32) align(1),
-        volume_label: [11]u8,
-        fs_name: [8]u8,
-        boot_code: [420]u8,
-    };
-
-    pub fn isFat32(self: *const BootSectorFormat) bool {
-        return self.fat_size_16.toNative() == 0;
-    }
-
-    pub fn bytesPerSector(self: *const BootSectorFormat) !u16 {
-        const bytes_per_sector = self.bytes_per_sector.toNative();
-        switch (bytes_per_sector) {
-            512, 1024, 2048, 4096 => return bytes_per_sector,
-            else => {
-                log.err("invalid sector size: {}", .{bytes_per_sector});
-                return error.InvalidFormat;
-            },
-        }
-    }
-
-    pub fn sectorsPerCluster(self: *const BootSectorFormat) !u8 {
-        const sectors_per_cluster = self.sectors_per_cluster;
-        if (!std.math.isPowerOfTwo(sectors_per_cluster)) {
-            log.err("number of sectors per cluster must be power of 2", .{});
-            return error.InvalidFormat;
-        }
-        return sectors_per_cluster;
-    }
-
-    pub fn reservedSectorCount(self: *const BootSectorFormat) !u16 {
-        const reserved_sector_count = self.reserved_sector_count.toNative();
-        if (reserved_sector_count == 0) {
-            log.err("number of reserved sectors must not be 0", .{});
-            return error.InvalidFormat;
-        }
-        return reserved_sector_count;
-    }
-
-    pub fn sectorsPerFat(self: *const BootSectorFormat) !u32 {
-        const fat_size = if (self.isFat32())
-            self.type.fat32.fat_size_32.toNative()
-        else
-            @as(u32, self.fat_size_16.toNative());
-        if (fat_size == 0) {
-            log.err("FAT size must not be 0", .{});
-            return error.InvalidFormat;
-        }
-        return fat_size;
-    }
-
-    pub fn fatCount(self: *const BootSectorFormat) !u8 {
-        if (self.fat_count == 0) {
-            log.err("number of FATs must not be 0", .{});
-            return error.InvalidFormat;
-        }
-        return self.fat_count;
-    }
-
-    pub fn rootDirEntryCount(self: *const BootSectorFormat) !?u16 {
-        if (!self.isFat32()) {
-            return self.root_entry_count.toNative();
-        }
-        if (0 < self.root_entry_count.toNative()) {
-            log.err("number of root directory entries must no be specified for FAT32", .{});
-            return error.InvalidFormat;
-        }
-        return null;
-    }
-
-    pub fn totalSectorCount(self: *const BootSectorFormat) !u32 {
-        if (!self.isFat32() and self.total_sectors_32.toNative() == 0) {
-            return self.total_sectors_16.toNative();
-        }
-        if (0 < self.total_sectors_16.toNative()) {
-            log.err("16-bit and 32-bit total sectors fields must be used exclusively", .{});
-            return error.InvalidFormat;
-        }
-        return self.total_sectors_32.toNative();
-    }
-
-    pub fn fat32RootCluster(self: *const BootSectorFormat) !u32 {
-        const root_cluster = self.type.fat32.root_cluster.toNative();
-        if (root_cluster < 2) {
-            log.err("cluster number must be greater than or equal to 2", .{});
-            return error.InvalidFormat;
-        }
-        return root_cluster;
-    }
-};
-
 pub const BootSector = struct {
     bytes_per_sector: u16,
     sectors_per_cluster: u8,
@@ -192,7 +45,7 @@ pub const BootSector = struct {
 
     pub fn readFrom(src: anytype, sector_offset: u32) !BootSector {
         const r = shared.bytes.wrapWithReader(src);
-        const raw = try r.takeStruct(BootSectorFormat);
+        const raw = try r.takeStruct(Format);
         try raw.signature.toNative().assertValid();
 
         const is_fat32 = raw.isFat32();
@@ -207,7 +60,7 @@ pub const BootSector = struct {
         const fat_sector_count = try raw.sectorsPerFat() * try raw.fatCount();
         const root_dir_entry_count = try raw.rootDirEntryCount();
         const root_dir_area_sector_count = if (root_dir_entry_count) |n|
-            (@sizeOf(DirectoryEntryFormat) * n + bytes_per_sector - 1) / bytes_per_sector
+            (@sizeOf(DirectoryEntry.Format) * n + bytes_per_sector - 1) / bytes_per_sector
         else
             0;
         const first_root_dir_sector = if (is_fat32)
@@ -252,6 +105,153 @@ pub const BootSector = struct {
             },
         };
     }
+
+    pub const Format = extern struct {
+        comptime {
+            std.debug.assert(512 == @sizeOf(Format));
+        }
+
+        jmp_boot: [3]u8,
+        oem_name: [8]u8,
+        bytes_per_sector: Le(u16) align(1),
+        sectors_per_cluster: u8,
+        reserved_sector_count: Le(u16) align(1),
+        fat_count: u8,
+        root_entry_count: Le(u16) align(1),
+        /// - FAT12/16: valid only when total_sectors < 0x10000
+        /// - FAT32: always invalid
+        total_sectors_16: Le(u16) align(1),
+        media: u8,
+        /// - FAT12/16: always valid
+        /// - FAT32: always invalid
+        fat_size_16: Le(u16) align(1),
+        sectors_per_track: Le(u16) align(1),
+        head_count: Le(u16) align(1),
+        hidden_sectors: Le(u32) align(1),
+        /// - FAT12/16: valid only when total_sectors >= 0x10000
+        /// - FAT32: always valid
+        total_sectors_32: Le(u32) align(1),
+        type: extern union {
+            fat12: Fat12Or16Specific,
+            fat16: Fat12Or16Specific,
+            fat32: Fat32Specific,
+        },
+        signature: Le(Magic(u16, 0xAA55)) align(1),
+        // Remaining bytes are filled by 0.
+
+        pub const Fat12Or16Specific = extern struct {
+            drive_num: u8,
+            _bs_reserved: u8 = 0,
+            /// This should be validated before accessing the following 3 fields.
+            boot_signature: Magic(u8, 0x29),
+            volume_id: Le(u32) align(1),
+            volume_label: [11]u8,
+            fs_name: [8]u8,
+            boot_code: [448]u8,
+        };
+
+        pub const Fat32Specific = extern struct {
+            fat_size_32: Le(u32) align(1),
+            ext_flags: Le(u16) align(1),
+            fs_version: Le(u16) align(1),
+            root_cluster: Le(u32) align(1),
+            fs_info: Le(u16) align(1),
+            boot_sector_backup: Le(u16) align(1),
+            _bpb_reserved: [12]u8 = @splat(0),
+            drive_num: u8,
+            _bs_reserved: u8 = 0,
+            /// This should be validated before accessing the following 3 fields.
+            boot_signature: Magic(u8, 0x29),
+            volume_id: Le(u32) align(1),
+            volume_label: [11]u8,
+            fs_name: [8]u8,
+            boot_code: [420]u8,
+        };
+
+        pub fn isFat32(self: *const Format) bool {
+            return self.fat_size_16.toNative() == 0;
+        }
+
+        pub fn bytesPerSector(self: *const Format) !u16 {
+            const bytes_per_sector = self.bytes_per_sector.toNative();
+            switch (bytes_per_sector) {
+                512, 1024, 2048, 4096 => return bytes_per_sector,
+                else => {
+                    log.err("invalid sector size: {}", .{bytes_per_sector});
+                    return error.InvalidFormat;
+                },
+            }
+        }
+
+        pub fn sectorsPerCluster(self: *const Format) !u8 {
+            const sectors_per_cluster = self.sectors_per_cluster;
+            if (!std.math.isPowerOfTwo(sectors_per_cluster)) {
+                log.err("number of sectors per cluster must be power of 2", .{});
+                return error.InvalidFormat;
+            }
+            return sectors_per_cluster;
+        }
+
+        pub fn reservedSectorCount(self: *const Format) !u16 {
+            const reserved_sector_count = self.reserved_sector_count.toNative();
+            if (reserved_sector_count == 0) {
+                log.err("number of reserved sectors must not be 0", .{});
+                return error.InvalidFormat;
+            }
+            return reserved_sector_count;
+        }
+
+        pub fn sectorsPerFat(self: *const Format) !u32 {
+            const fat_size = if (self.isFat32())
+                self.type.fat32.fat_size_32.toNative()
+            else
+                @as(u32, self.fat_size_16.toNative());
+            if (fat_size == 0) {
+                log.err("FAT size must not be 0", .{});
+                return error.InvalidFormat;
+            }
+            return fat_size;
+        }
+
+        pub fn fatCount(self: *const Format) !u8 {
+            if (self.fat_count == 0) {
+                log.err("number of FATs must not be 0", .{});
+                return error.InvalidFormat;
+            }
+            return self.fat_count;
+        }
+
+        pub fn rootDirEntryCount(self: *const Format) !?u16 {
+            if (!self.isFat32()) {
+                return self.root_entry_count.toNative();
+            }
+            if (0 < self.root_entry_count.toNative()) {
+                log.err("number of root directory entries must no be specified for FAT32", .{});
+                return error.InvalidFormat;
+            }
+            return null;
+        }
+
+        pub fn totalSectorCount(self: *const Format) !u32 {
+            if (!self.isFat32() and self.total_sectors_32.toNative() == 0) {
+                return self.total_sectors_16.toNative();
+            }
+            if (0 < self.total_sectors_16.toNative()) {
+                log.err("16-bit and 32-bit total sectors fields must be used exclusively", .{});
+                return error.InvalidFormat;
+            }
+            return self.total_sectors_32.toNative();
+        }
+
+        pub fn fat32RootCluster(self: *const Format) !u32 {
+            const root_cluster = self.type.fat32.root_cluster.toNative();
+            if (root_cluster < 2) {
+                log.err("cluster number must be greater than or equal to 2", .{});
+                return error.InvalidFormat;
+            }
+            return root_cluster;
+        }
+    };
 };
 
 pub fn Entry(fat_type: Type) type {
@@ -290,82 +290,121 @@ pub fn Entry(fat_type: Type) type {
     });
 }
 
-pub const DirectoryEntryFormat = extern struct {
-    comptime {
-        std.debug.assert(32 == @sizeOf(DirectoryEntryFormat));
+pub const CombinedDirectoryEntry = struct {
+    /// ANSI/OEM
+    short_name: [11]u8,
+    attribute: DirectoryEntry.Format.Attribute,
+    first_cluster: u32,
+    file_size: u32,
+    /// UTF-16LE
+    long_name: [255]u16 = undefined,
+    long_name_len: usize = 0,
+
+    pub fn readFrom(src: anytype) !?CombinedDirectoryEntry {
+        return entry: while (true) {
+            const last = switch (try DirectoryEntry.readFrom(src)) {
+                .free => break null,
+                .removed => continue,
+                .short => |short| break .{
+                    .short_name = short.name,
+                    .attribute = short.attribute,
+                    .first_cluster = short.first_cluster,
+                    .file_size = short.file_size,
+                },
+                .long => |long| long,
+            };
+            if (!last.last) {
+                log.warn("last LFN not found", .{});
+                continue;
+            }
+            if (last.seq < 1 or 20 < last.seq) {
+                log.warn("invalid LFN sequence number: {}", .{last.seq});
+                continue;
+            }
+            const long_name_len = (last.seq - 1) * 13 + last.getName().len;
+            if (255 < long_name_len) {
+                log.warn("too long LFN length: {}", .{long_name_len});
+                continue;
+            }
+            var long_name: [255]u16 = undefined;
+            @memcpy(long_name[(last.seq - 1) * 13..][0..last.getName().len], last.getName());
+            const actual_checksum = last.checksum;
+            var expected_seq = last.seq - 1;
+            while (0 < expected_seq) : (expected_seq -= 1) {
+                switch (try DirectoryEntry.readFrom(src)) {
+                    .free => {
+                        log.warn("free entry in LFN sequence", .{});
+                        break :entry null;
+                    },
+                    .removed => {
+                        log.warn("removed entry in LFN sequence", .{});
+                        continue :entry;
+                    },
+                    .long => |long| {
+                        if (long.last) {
+                            log.warn("unexpected last LFN entry in LFN sequence", .{});
+                            continue :entry;
+                        }
+                        if (long.seq != expected_seq) {
+                            log.warn("noncontinguous LFN sequence number: expected {}, got {}", .{
+                                expected_seq,
+                                long.seq,
+                            });
+                            continue :entry;
+                        }
+                        if (long.checksum != actual_checksum) {
+                            log.warn("LFN checksum mismatch", .{});
+                            continue :entry;
+                        }
+                        @memcpy(long_name[(long.seq - 1) * 13..][0..13], &long.name);
+                    },
+                    .short => {
+                        log.warn("unexpected SFN entry in LFN sequence", .{});
+                        continue :entry;
+                    },
+                }
+            }
+            switch (try DirectoryEntry.readFrom(src)) {
+                .free => {
+                    log.warn("SFN not found after LFN", .{});
+                    break :entry null;
+                },
+                .removed => {
+                    log.warn("SFN entry was removed", .{});
+                    continue :entry;
+                },
+                .short => |short| {
+                    if (short.checksum != actual_checksum) {
+                        log.warn("SFN checksum mismatch", .{});
+                        continue :entry;
+                    }
+                    break :entry .{
+                        .short_name = short.name,
+                        .attribute = short.attribute,
+                        .first_cluster = short.first_cluster,
+                        .file_size = short.file_size,
+                        .long_name = long_name,
+                        .long_name_len = long_name_len,
+                    };
+                },
+                .long => {
+                    log.warn("unexpected LFN entry while expecting SFN", .{});
+                    continue :entry;
+                },
+            }
+        };
     }
 
-    first_byte: FirstByte,
-    name: [10]u8,
-    attribute: Attribute,
-    type: extern union {
-        short: extern struct {
-            nt_reserved: packed struct(u8) {
-                _0: u3 = 0,
-                lowercase_body: bool,
-                lowercase_ext: bool,
-                _1: u3 = 0,
-            },
-            create_time_tenth: u8,
-            create_time: Le(u16) align(1),
-            create_date: Le(u16) align(1),
-            last_access_date: Le(u16) align(1),
-            first_cluster_high: Le(u16) align(1),
-            write_time: Le(u16) align(1),
-            write_date: Le(u16) align(1),
-            first_cluster_low: Le(u16) align(1),
-            file_size: Le(u32) align(1),
+    pub fn longName(self: *const CombinedDirectoryEntry) ?[]const u16 {
+        if (self.long_name_len == 0) return null;
+        return self.long_name[0..self.long_name_len];
+    }
 
-            pub fn firstCluster(self: *const @This()) u32 {
-                return (@as(u32, self.first_cluster_high.toNative()) << 16) | self.first_cluster_low.toNative();
-            }
-        },
-        long: extern struct {
-            _type: u8 = 0,
-            checksum: u8,
-            name2: [12]u8,
-            _first_cluster_low: Le(u16) align(1) = .fromNative(0),
-            name3: [4]u8,
-        },
-    },
-
-    pub const FirstByte = extern union {
-        short: enum(u8) {
-            free_entry = 0x00,
-            removed_entry = 0xE5,
-            /// First byte of the name is 0xE5
-            replaced = 0x05,
-            /// First byte of the name
-            _,
-        },
-        long: packed struct(u8) {
-            /// 1...20
-            seq: u6,
-            // 0x40 = 0b0100_0000
-            last: bool,
-            _: u1 = 0,
-        },
-    };
-
-    pub const Attribute = packed struct(u8) {
-        readonly: bool = false,
-        hidden: bool = false,
-        system: bool = false,
-        volume_id: bool = false,
-        directory: bool = false,
-        archive: bool = false,
-        _: u2 = 0,
-
-        pub const long_file_name: Attribute = .{
-            .readonly = true,
-            .hidden = true,
-            .system = true,
-            .volume_id = true,
-        };
-    };
-
-    pub fn isLongFileName(self: *const DirectoryEntryFormat) bool {
-        return self.attribute == Attribute.long_file_name;
+    pub fn format(self: CombinedDirectoryEntry, w: *std.Io.Writer) std.Io.Writer.Error!void {
+        try w.print("{f} {B: >12}  {s}", .{ self.attribute, self.file_size, &self.short_name });
+        if (self.longName()) |long_name| {
+            try w.print(" // {f}", .{std.unicode.fmtUtf16Le(long_name)});
+        }
     }
 };
 
@@ -375,7 +414,8 @@ pub const DirectoryEntry = union(enum) {
     removed,
     short: struct {
         name: [11]u8,
-        attribute: DirectoryEntryFormat.Attribute,
+        checksum: u8,
+        attribute: Format.Attribute,
         first_cluster: u32,
         file_size: u32,
     },
@@ -395,7 +435,7 @@ pub const DirectoryEntry = union(enum) {
 
     pub fn readFrom(src: anytype) !DirectoryEntry {
         const r = shared.bytes.wrapWithReader(src);
-        const raw = try r.takeStruct(DirectoryEntryFormat);
+        const raw = try r.takeStruct(Format);
         if (raw.isLongFileName()) {
             const first_byte = raw.first_byte.long;
             const long = raw.type.long;
@@ -422,9 +462,15 @@ pub const DirectoryEntry = union(enum) {
             if (short.nt_reserved.lowercase_ext) {
                 for (8..11) |i| name[i] = std.ascii.toLower(name[i]);
             }
+            var checksum: u8 = @intFromEnum(first_byte);
+            for (raw.name) |byte| {
+                checksum = (checksum >> 1) | (checksum << 7);
+                checksum +%= byte;
+            }
             return .{
                 .short = .{
                     .name = name,
+                    .checksum = checksum,
                     .attribute = raw.attribute,
                     .first_cluster = short.firstCluster(),
                     .file_size = short.file_size.toNative(),
@@ -433,20 +479,93 @@ pub const DirectoryEntry = union(enum) {
         }
     }
 
-    pub fn format(self: DirectoryEntry, w: *std.Io.Writer) std.Io.Writer.Error!void {
-        switch (self) {
-            .free => {
-                try w.print(".free", .{});
-            },
-            .removed => {
-                try w.print(".removed", .{});
-            },
-            .short => |short| {
-                try w.print("short: {s}, size: {B} -- {any}", .{ short.name, short.file_size, short.attribute });
-            },
-            .long => |long| {
-                try w.print("long: {f}", .{std.unicode.fmtUtf16Le(long.getName())});
-            },
+    pub const Format = extern struct {
+        comptime {
+            std.debug.assert(32 == @sizeOf(Format));
         }
-    }
+
+        first_byte: FirstByte,
+        name: [10]u8,
+        attribute: Attribute,
+        type: extern union {
+            short: extern struct {
+                nt_reserved: packed struct(u8) {
+                    _0: u3 = 0,
+                    lowercase_body: bool,
+                    lowercase_ext: bool,
+                    _1: u3 = 0,
+                },
+                create_time_tenth: u8,
+                create_time: Le(u16) align(1),
+                create_date: Le(u16) align(1),
+                last_access_date: Le(u16) align(1),
+                first_cluster_high: Le(u16) align(1),
+                write_time: Le(u16) align(1),
+                write_date: Le(u16) align(1),
+                first_cluster_low: Le(u16) align(1),
+                file_size: Le(u32) align(1),
+
+                pub fn firstCluster(self: *const @This()) u32 {
+                    return (@as(u32, self.first_cluster_high.toNative()) << 16) | self.first_cluster_low.toNative();
+                }
+            },
+            long: extern struct {
+                _type: u8 = 0,
+                checksum: u8,
+                name2: [12]u8,
+                _first_cluster_low: Le(u16) align(1) = .fromNative(0),
+                name3: [4]u8,
+            },
+        },
+
+        pub const FirstByte = extern union {
+            short: enum(u8) {
+                free_entry = 0x00,
+                removed_entry = 0xE5,
+                /// First byte of the name is 0xE5
+                replaced = 0x05,
+                /// First byte of the name
+                _,
+            },
+            long: packed struct(u8) {
+                /// 1...20
+                seq: u6,
+                // 0x40 = 0b0100_0000
+                last: bool,
+                _: u1 = 0,
+            },
+        };
+
+        pub const Attribute = packed struct(u8) {
+            readonly: bool = false,
+            hidden: bool = false,
+            system: bool = false,
+            volume_id: bool = false,
+            directory: bool = false,
+            archive: bool = false,
+            _: u2 = 0,
+
+            pub const long_file_name: Attribute = .{
+                .readonly = true,
+                .hidden = true,
+                .system = true,
+                .volume_id = true,
+            };
+
+            pub fn format(self: Attribute, w: *std.Io.Writer) std.Io.Writer.Error!void {
+                try w.writeAll(&.{
+                    if (self.archive) 'a' else '-',
+                    if (self.directory) 'd' else '-',
+                    if (self.volume_id) 'v' else '-',
+                    if (self.system) 's' else '-',
+                    if (self.hidden) 'h' else '-',
+                    if (self.readonly) 'r' else '-',
+                });
+            }
+        };
+
+        pub fn isLongFileName(self: *const Format) bool {
+            return self.attribute == Attribute.long_file_name;
+        }
+    };
 };
