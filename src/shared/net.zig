@@ -116,11 +116,11 @@ pub const ArpFrame = struct {
 
     pub fn readFrom(src: anytype) !?ArpFrame {
         const r = bytes.wrapWithReader(src);
-        const eth = try r.takeStruct(EthernetHeader);
+        const eth = try r.takePtr(EthernetHeader);
         if (eth.protocol.toNative() != .arp) return null;
-        const arp = try r.takeStruct(ArpHeader);
+        const arp = try r.takePtr(ArpHeader);
         _ = arp;
-        const body = try r.takeStruct(StaticArpBody(.ethernet, .ipv4));
+        const body = try r.takePtr(StaticArpBody(.ethernet, .ipv4));
         return .{
             .source_mac = eth.source_mac_address,
             .target_mac = eth.target_mac_address,
@@ -277,11 +277,11 @@ pub const IcmpEchoFrame = struct {
 
     pub fn readFrom(src: anytype) !?IcmpEchoFrame {
         const r = bytes.wrapWithReader(src);
-        const eth = try r.takeStruct(EthernetHeader);
+        const eth = try r.takePtr(EthernetHeader);
         if (eth.protocol.toNative() != .ipv4) return null;
-        const ip = try r.takeStruct(Ipv4Header);
+        const ip = try r.takePtr(Ipv4Header);
         if (ip.protocol != .icmp) return null;
-        const icmp = try r.takeStruct(IcmpEchoHeader);
+        const icmp = try r.takePtr(IcmpEchoHeader);
         if (icmp.type != .echo_reply) return null;
         return .{
             .source_mac = eth.source_mac_address,

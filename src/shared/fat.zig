@@ -45,7 +45,7 @@ pub const BootSector = struct {
 
     pub fn readFrom(src: anytype, sector_offset: u32) !BootSector {
         const r = shared.bytes.wrapWithReader(src);
-        const raw = try r.takeStruct(Format);
+        const raw = try r.takePtr(Format);
         try raw.signature.toNative().assertValid();
 
         const is_fat32 = raw.isFat32();
@@ -327,7 +327,7 @@ pub const CombinedDirectoryEntry = struct {
                 continue;
             }
             var long_name: [255]u16 = undefined;
-            @memcpy(long_name[(last.seq - 1) * 13..][0..last.getName().len], last.getName());
+            @memcpy(long_name[(last.seq - 1) * 13 ..][0..last.getName().len], last.getName());
             const actual_checksum = last.checksum;
             var expected_seq = last.seq - 1;
             while (0 < expected_seq) : (expected_seq -= 1) {
@@ -356,7 +356,7 @@ pub const CombinedDirectoryEntry = struct {
                             log.warn("LFN checksum mismatch", .{});
                             continue :entry;
                         }
-                        @memcpy(long_name[(long.seq - 1) * 13..][0..13], &long.name);
+                        @memcpy(long_name[(long.seq - 1) * 13 ..][0..13], &long.name);
                     },
                     .short => {
                         log.warn("unexpected SFN entry in LFN sequence", .{});
@@ -435,7 +435,7 @@ pub const DirectoryEntry = union(enum) {
 
     pub fn readFrom(src: anytype) !DirectoryEntry {
         const r = shared.bytes.wrapWithReader(src);
-        const raw = try r.takeStruct(Format);
+        const raw = try r.takePtr(Format);
         if (raw.isLongFileName()) {
             const first_byte = raw.first_byte.long;
             const long = raw.type.long;

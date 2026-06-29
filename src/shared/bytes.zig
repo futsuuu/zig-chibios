@@ -22,13 +22,15 @@ pub fn Reader(Src: type) type {
             return self.src.remaining();
         }
 
-        pub fn takeArray(self: Self, comptime len: usize) !*const [len]u8 {
-            return (try self.take(len))[0..len];
+        pub fn alignForward(self: Self, alignment: usize) !void {
+            return self.src.alignForward(alignment);
         }
 
-        pub fn takeStruct(self: Self, T: type) !*align(1) const T {
-            comptime std.debug.assert(@typeInfo(T).@"struct".layout == .@"extern");
-            return @ptrCast(try self.takeArray(@sizeOf(T)));
+        pub fn takePtr(self: Self, T: type) !*align(1) const T {
+            _ = @typeInfo(extern struct { _: T }); // guaranteed in-memory representation is required
+            const array = (try self.take(@sizeOf(T)))[0..@sizeOf(T)];
+            const wrapper: *align(1) const T = @ptrCast(array);
+            return wrapper;
         }
 
         pub fn takeInt(self: Self, T: type, endian: std.builtin.Endian) !T {
@@ -47,13 +49,6 @@ pub fn Reader(Src: type) type {
             const result = try self.take(end);
             _ = try self.take(1);
             return result;
-        }
-
-        pub fn alignForward(self: Self, alignment: usize) !void {
-            if (std.meta.hasMethod(Src, "alignForward")) {
-                return self.src.alignForward(alignment);
-            }
-            @compileError(std.fmt.comptimePrint("{} does not have 'alignForward' method", .{@typeName(Src)}));
         }
     };
 }
