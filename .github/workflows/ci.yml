@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        target:
+          - riscv32-freestanding
+          - riscv64-freestanding
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+
+      - run: sudo apt-get update -q
+
+      - name: Install QEMU
+        run: sudo apt-get install -y qemu-system opensbi
+
+      - name: Build
+        run: |
+          zig build -Dtarget=${{ matrix.target }} --verbose --summary all
+          zig build -Dtarget=${{ matrix.target }} --verbose --summary all --release
+
+      - name: Test
+        run: zig build test -Dtarget=${{ matrix.target }} --verbose --summary all
