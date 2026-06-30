@@ -30,7 +30,11 @@ fn Magic(Int: type, expected: Int) type {
 pub const BootSector = struct {
     bytes_per_sector: u16,
     sectors_per_cluster: u8,
+    sectors_per_fat: u32,
+    fat_count: u8,
     first_root_dir_sector: u32,
+    first_data_sector: u32,
+    first_fat_sector: u32,
 
     volume_id: u32,
     volume_label: [11]u8,
@@ -42,6 +46,143 @@ pub const BootSector = struct {
     },
 
     const max_fat12_cluster_count: u32 = 4085;
+
+    pub fn firstSectorOfCluster(self: *const BootSector, cluster: u32) u32 {
+        return self.first_data_sector + (cluster - 2) * self.sectors_per_cluster;
+    }
+
+    test firstSectorOfCluster {
+        const boot: BootSector = .{
+            .bytes_per_sector = 512,
+            .sectors_per_cluster = 1,
+            .first_root_dir_sector = 100,
+            .volume_id = 0,
+            .volume_label = undefined,
+            .type = .fat16,
+            .first_data_sector = 200,
+            .first_fat_sector = 50,
+            .sectors_per_fat = 10,
+            .fat_count = 2,
+        };
+        try std.testing.expectEqual(200, boot.firstSectorOfCluster(2));
+        try std.testing.expectEqual(201, boot.firstSectorOfCluster(3));
+        try std.testing.expectEqual(300, boot.firstSectorOfCluster(102));
+
+        const boot2: BootSector = .{
+            .bytes_per_sector = 1024,
+            .sectors_per_cluster = 4,
+            .first_root_dir_sector = 100,
+            .volume_id = 0,
+            .volume_label = undefined,
+            .type = .fat16,
+            .first_data_sector = 500,
+            .first_fat_sector = 50,
+            .sectors_per_fat = 10,
+            .fat_count = 2,
+        };
+        try std.testing.expectEqual(500, boot2.firstSectorOfCluster(2));
+        try std.testing.expectEqual(504, boot2.firstSectorOfCluster(3));
+        try std.testing.expectEqual(900, boot2.firstSectorOfCluster(102));
+    }
+
+    pub fn entryLocation(self: *const BootSector, cluster: u32) EntryLocation {
+        const bits_per_entry: u32 = switch (self.type) {
+            .fat12 => @bitSizeOf(Entry(.fat12)),
+            .fat16 => @bitSizeOf(Entry(.fat16)),
+            .fat32 => @bitSizeOf(Entry(.fat32)),
+        };
+        // cluster * bits_per_entry can overflow?
+        const byte_offset = (@as(u64, cluster) * bits_per_entry) / 8;
+        return .{
+            .sector = self.first_fat_sector + @as(u32, @intCast(byte_offset / self.bytes_per_sector)),
+            .byte_offset = @intCast(byte_offset % self.bytes_per_sector),
+        };
+    }
+
+    test entryLocation {
+        const boot16: BootSector = .{
+            .bytes_per_sector = 512,
+            .sectors_per_cluster = 1,
+            .first_root_dir_sector = 100,
+            .volume_id = 0,
+            .volume_label = undefined,
+            .type = .fat16,
+            .first_data_sector = 200,
+            .first_fat_sector = 1,
+            .sectors_per_fat = 10,
+            .fat_count = 2,
+        };
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 1,
+            .byte_offset = 0,
+        }, boot16.entryLocation(0));
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 1,
+            .byte_offset = 4,
+        }, boot16.entryLocation(2));
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 2,
+            .byte_offset = 0,
+        }, boot16.entryLocation(256));
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 2,
+            .byte_offset = 2,
+        }, boot16.entryLocation(257));
+
+        const boot32: BootSector = .{
+            .bytes_per_sector = 512,
+            .sectors_per_cluster = 1,
+            .first_root_dir_sector = 100,
+            .volume_id = 0,
+            .volume_label = undefined,
+            .type = .fat32,
+            .first_data_sector = 200,
+            .first_fat_sector = 32,
+            .sectors_per_fat = 100,
+            .fat_count = 2,
+        };
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 32,
+            .byte_offset = 0,
+        }, boot32.entryLocation(0));
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 32,
+            .byte_offset = 8,
+        }, boot32.entryLocation(2));
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 33,
+            .byte_offset = 0,
+        }, boot32.entryLocation(128));
+
+        const boot12: BootSector = .{
+            .bytes_per_sector = 512,
+            .sectors_per_cluster = 1,
+            .first_root_dir_sector = 100,
+            .volume_id = 0,
+            .volume_label = undefined,
+            .type = .fat12,
+            .first_data_sector = 200,
+            .first_fat_sector = 1,
+            .sectors_per_fat = 3,
+            .fat_count = 1,
+        };
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 1,
+            .byte_offset = 0,
+        }, boot12.entryLocation(0));
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 1,
+            .byte_offset = 1,
+        }, boot12.entryLocation(1));
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 1,
+            .byte_offset = 3,
+        }, boot12.entryLocation(2));
+        try std.testing.expectEqual(EntryLocation{
+            .sector = 1,
+            .byte_offset = 4,
+        }, boot12.entryLocation(3));
+    }
 
     pub fn readFrom(src: anytype, sector_offset: u32) !BootSector {
         const r = shared.bytes.wrapWithReader(src);
@@ -57,24 +198,27 @@ pub const BootSector = struct {
         const sectors_per_cluster = try raw.sectorsPerCluster();
 
         const reserved_sector_count = try raw.reservedSectorCount();
-        const fat_sector_count = try raw.sectorsPerFat() * try raw.fatCount();
+        const sectors_per_fat = try raw.sectorsPerFat();
+        const fat_count = try raw.fatCount();
+        const fat_sector_count = sectors_per_fat * fat_count;
         const root_dir_entry_count = try raw.rootDirEntryCount();
         const root_dir_area_sector_count = if (root_dir_entry_count) |n|
             (@sizeOf(DirectoryEntry.Format) * n + bytes_per_sector - 1) / bytes_per_sector
         else
             0;
+        const first_fat_sector = reserved_sector_count;
         const first_root_dir_sector = if (is_fat32)
             reserved_sector_count + fat_sector_count + (try raw.fat32RootCluster() - 2) * sectors_per_cluster
         else
             reserved_sector_count + fat_sector_count;
+        const first_data_sector = reserved_sector_count + fat_sector_count + root_dir_area_sector_count;
 
-        // data area
         const total_sector_count = try raw.totalSectorCount();
-        if (total_sector_count < reserved_sector_count + fat_sector_count + root_dir_area_sector_count) {
+        if (total_sector_count < first_data_sector) {
             log.err("invalid number of total sectors", .{});
             return error.InvalidFormat;
         }
-        const data_sector_count = total_sector_count - reserved_sector_count - fat_sector_count - root_dir_area_sector_count;
+        const data_sector_count = total_sector_count - first_data_sector;
 
         const cluster_count = data_sector_count / sectors_per_cluster;
         const fat_type: Type = if (is_fat32) .fat32 else if (cluster_count <= max_fat12_cluster_count) .fat12 else .fat16;
@@ -93,7 +237,11 @@ pub const BootSector = struct {
         return .{
             .bytes_per_sector = bytes_per_sector,
             .sectors_per_cluster = sectors_per_cluster,
+            .sectors_per_fat = sectors_per_fat,
+            .fat_count = fat_count,
             .first_root_dir_sector = sector_offset + first_root_dir_sector,
+            .first_data_sector = sector_offset + first_data_sector,
+            .first_fat_sector = sector_offset + first_fat_sector,
 
             .volume_id = volume_id,
             .volume_label = volume_label,
@@ -252,6 +400,11 @@ pub const BootSector = struct {
             return root_cluster;
         }
     };
+};
+
+pub const EntryLocation = struct {
+    sector: u32,
+    byte_offset: u16,
 };
 
 pub fn Entry(fat_type: Type) type {
@@ -569,3 +722,7 @@ pub const DirectoryEntry = union(enum) {
         }
     };
 };
+
+comptime {
+    std.testing.refAllDecls(@This());
+}
