@@ -1,0 +1,12 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    groups:
+      github-actions:
+        patterns: ["*"]
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ".github/workflows: "
