@@ -111,7 +111,7 @@ pub const base = struct {
     }
 
     test getSpecVersion {
-        try std.testing.expect(getSpecVersion().order(try .parse("2.0.0")) != .lt);
+        try std.testing.expect(getSpecVersion().order(try .parse("0.2.0")) != .lt);
     }
 };
 
