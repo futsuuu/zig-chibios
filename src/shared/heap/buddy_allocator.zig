@@ -381,7 +381,7 @@ const Blocks = struct {
     }
 
     test parentRange {
-        var buf: [16]u8 = undefined;
+        var buf: [32]u8 = undefined;
         var fba: std.heap.FixedBufferAllocator = .init(&buf);
         var blocks: Blocks = try .init(fba.allocator(), 16);
         try std.testing.expectEqual(Range.init(2, 3), blocks.parentRange(.used, Range.init(4, 6).?));
