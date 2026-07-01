@@ -27,7 +27,7 @@ jobs:
       - run: sudo apt-get update -q
 
       - name: Install QEMU
-        run: sudo apt-get install -y qemu-system opensbi
+        run: sudo apt-get install -y qemu-system-misc
 
       - name: Build
         run: |
