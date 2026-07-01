@@ -3,7 +3,13 @@
     .version = "0.0.0",
     .fingerprint = 0xaaf789c4639d4b73,
     .minimum_zig_version = "0.16.0",
-    .dependencies = .{},
+    .dependencies = .{
+        .opensbi = .{
+            .url = "https://github.com/riscv-software-src/opensbi/releases/download/v1.8.1/opensbi-1.8.1-rv-bin.tar.xz",
+            .hash = "N-V-__8AAOxEcwclnNcC3_EDs2d0zAAzkyZayFGdfqggKXRw",
+            .lazy = true,
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",

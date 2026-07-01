@@ -10,8 +10,25 @@ pub fn build(b: *std.Build) void {
         .preferred_optimize_mode = .ReleaseSmall,
     });
 
+    const qemu_firmware_dir: std.Build.InstallDir = .{ .custom = "share/qemu-firmware" };
+
     const run_step = b.step("run", "Run the kernel with QEMU");
     const test_step = b.step("test", "Run tests");
+    const prepare_oensbi_step = b.step("prepare:opensbi", "Install OpenSBI for use as QEMU firmware");
+
+    const dep_opensbi = b.lazyDependency("opensbi", .{});
+    if (dep_opensbi) |dep| {
+        prepare_oensbi_step.dependOn(&b.addInstallFileWithDir(
+            dep.path("share/opensbi/ilp32/generic/firmware/fw_dynamic.bin"),
+            qemu_firmware_dir,
+            "opensbi-riscv32-generic-fw_dynamic.bin",
+        ).step);
+        prepare_oensbi_step.dependOn(&b.addInstallFileWithDir(
+            dep.path("share/opensbi/lp64/generic/firmware/fw_dynamic.bin"),
+            qemu_firmware_dir,
+            "opensbi-riscv64-generic-fw_dynamic.bin",
+        ).step);
+    }
 
     const shared_mod = shared: {
         const mod = b.createModule(.{
@@ -79,6 +96,8 @@ pub fn build(b: *std.Build) void {
         "virt",
         "-bios",
         "default",
+        "-L",
+        b.getInstallPath(qemu_firmware_dir, ""),
         "-nographic",
         "-serial",
         "mon:stdio",
@@ -102,6 +121,7 @@ pub fn build(b: *std.Build) void {
     });
     run_cmd.addArg("-kernel");
     run_cmd.addArtifactArg(kernel_elf);
+    run_cmd.step.dependOn(prepare_oensbi_step);
     run_cmd.step.dependOn(b.getInstallStep()); // creates /zig-out directory
     run_step.dependOn(&run_cmd.step);
 
@@ -144,6 +164,7 @@ pub fn build(b: *std.Build) void {
             },
         });
         arch_tests.setLinkerScript(b.path("src/arch/riscv/kernel.ld"));
+        arch_tests.step.dependOn(prepare_oensbi_step);
         arch_tests.setExecCmd(&([_]?[]const u8{qemu} ++ common_qemu_args ++ .{ "-kernel", null }));
         const run_arch_tests = b.addRunArtifact(arch_tests);
         test_step.dependOn(&run_arch_tests.step);
